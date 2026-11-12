@@ -75,7 +75,9 @@ permissions:
 
 concurrency:
   group: package-${{ github.ref }}
-  cancel-in-progress: true
+  # false: a re-dispatch must not cancel a run whose userdata artifact is still
+  # being uploaded; the next run simply queues behind it.
+  cancel-in-progress: false
 
 env:
   # A push carries no inputs context at all, so each value a step reads is copied
