@@ -541,6 +541,10 @@ jobs:
       - name: package
         working-directory: device
         env:
+          # prepare-xnu-source.py lists apple-oss-distributions/xnu on the
+          # GitHub API; anonymous calls share a per-address quota that hosted
+          # runners exhaust (HTTP 403 rate limit exceeded).
+          GITHUB_TOKEN: ${{ github.token }}
           PONG_ADRENO_FIRMWARE: ${{ runner.temp }}/stock
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
           UNIXNU_UEFI: ${{ github.workspace }}/uefi-liuqin
