@@ -1,0 +1,12 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -5943,7 +5943,8 @@
+ 		printf("Pong native4K: digest allocation failed bytes=%lu kr=%d\n", (unsigned long)allocation, kr);
+ 		return ENOMEM;
+ 	}
+-	buffer = kalloc_data(CS_NATIVE4K_CHUNK, Z_WAITOK);
++	/* APFS can leave a sparse zero tail unwritten; the page hashes cover it. */
++	buffer = kalloc_data(CS_NATIVE4K_CHUNK, Z_WAITOK | Z_ZERO);
+ 	if (buffer == NULL) {
+ 		error = ENOMEM;
+ 		goto out;

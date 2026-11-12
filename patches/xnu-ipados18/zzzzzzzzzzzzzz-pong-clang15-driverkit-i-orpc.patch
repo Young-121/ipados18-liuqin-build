@@ -1,0 +1,79 @@
+diff --git a/iokit/DriverKit/IORPC.h b/iokit/DriverKit/IORPC.h
+index 7ffc6b7..9fdf4b6 100644
+--- a/iokit/DriverKit/IORPC.h
++++ b/iokit/DriverKit/IORPC.h
+@@ -190,8 +190,6 @@ struct IORPCMessage {
+ #pragma pack(pop)
+ typedef struct IORPCMessage IORPCMessage;
+ 
+-#ifndef KERNEL
+-
+ #if defined(__cplusplus)
+ extern "C"
+ #else
+@@ -200,8 +198,6 @@ extern
+ IORPCMessage *
+ IORPCMessageFromMach(IORPCMessageMach * msg, bool reply);
+ 
+-#endif /* KERNEL */
+-
+ struct IORPCMessageErrorReturnContent {
+ 	IORPCMessage  hdr;
+ 	kern_return_t result;
+diff --git a/iokit/IOKit/IORPC.h b/iokit/IOKit/IORPC.h
+index 7ffc6b7..9fdf4b6 100644
+--- a/iokit/IOKit/IORPC.h
++++ b/iokit/IOKit/IORPC.h
+@@ -190,8 +190,6 @@ struct IORPCMessage {
+ #pragma pack(pop)
+ typedef struct IORPCMessage IORPCMessage;
+ 
+-#ifndef KERNEL
+-
+ #if defined(__cplusplus)
+ extern "C"
+ #else
+@@ -200,8 +198,6 @@ extern
+ IORPCMessage *
+ IORPCMessageFromMach(IORPCMessageMach * msg, bool reply);
+ 
+-#endif /* KERNEL */
+-
+ struct IORPCMessageErrorReturnContent {
+ 	IORPCMessage  hdr;
+ 	kern_return_t result;
+diff --git a/iokit/Kernel/IOUserServer.cpp b/iokit/Kernel/IOUserServer.cpp
+index 86f51a1..ec832f6 100644
+--- a/iokit/Kernel/IOUserServer.cpp
++++ b/iokit/Kernel/IOUserServer.cpp
+@@ -3623,15 +3623,14 @@ IOUserServer::rpc(IORPC rpc)
+ 
+ /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+ 
+-static IORPCMessage *
+-IORPCMessageFromMachReply(IORPCMessageMach * msg)
++extern "C" IORPCMessage *
++IORPCMessageFromMach(IORPCMessageMach * msg, bool reply)
+ {
+ 	mach_msg_size_t              idx, count;
+ 	mach_msg_port_descriptor_t * desc;
+ 	mach_msg_port_descriptor_t * maxDesc;
+ 	size_t                       size, msgsize;
+ 	bool                         upgrade;
+-	bool                         reply = true;
+ 
+ 	msgsize = msg->msgh.msgh_size;
+ 	count   = msg->msgh_body.msgh_descriptor_count;
+@@ -3663,6 +3662,12 @@ IORPCMessageFromMachReply(IORPCMessageMach * msg)
+ 	return (IORPCMessage *)(uintptr_t) desc;
+ }
+ 
++static IORPCMessage *
++IORPCMessageFromMachReply(IORPCMessageMach * msg)
++{
++	return IORPCMessageFromMach(msg, true);
++}
++
+ ipc_port_t
+ IOUserServer::copySendRightForObject(OSObject * object, ipc_kobject_type_t type)
+ {

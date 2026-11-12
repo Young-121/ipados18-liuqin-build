@@ -1,0 +1,424 @@
+--- a/libkern/amfi/miniamfi.c
++++ b/libkern/amfi/miniamfi.c
+@@ -126,96 +126,391 @@
+ 	return miniamfi_entitlement_object(proc, entitlement_name, entitlement_object);
+ }
+ 
+-/* libTrustCache: there are no trust caches, so nothing loads and nothing is found */
++/* libTrustCache: keep the boot loader's modules in place and search them.
++ *
++ * The 22H374 boot path hands two version-2 modules through chosen/memory-map:
++ * the Cryptex1 System trust cache (which owns the dyld shared cache cdhash)
++ * and the StaticTrustCache (the OS volume).  The real AMFI kext is not in the
++ * prelinked collection, so this stand-in performs the module validation and
++ * hash lookup the shared-cache registration path needs.
++ */
+ 
++static size_t
++mini_tc_entry_size(uint32_t version)
++{
++	switch (version) {
++	case kTCVersion0:
++		return sizeof(TrustCacheEntry0_t);
++	case kTCVersion1:
++		return sizeof(TrustCacheEntry1_t);
++	case kTCVersion2:
++		return sizeof(TrustCacheEntry2_t);
++	default:
++		return 0;
++	}
++}
++
++static bool
++mini_tc_module_shape(const TrustCacheModuleBase_t *module, size_t module_size,
++    uint32_t *version_out, uint32_t *count_out)
++{
++	uint32_t version;
++	uint32_t count;
++	size_t entry_size;
++
++	if (module == NULL || module_size < sizeof(TrustCacheModule2_t)) {
++		return false;
++	}
++	version = module->version;
++	entry_size = mini_tc_entry_size(version);
++	if (entry_size == 0) {
++		return false;
++	}
++	memcpy(&count, (const uint8_t *)module + 20, sizeof(count));
++	/* load_static_trust_cache() hands each module the whole remainder of
++	 * the trust cache segment, not just that module.  The module header's
++	 * count defines its real length; trailing modules/padding are fine. */
++	if (count > (module_size - sizeof(TrustCacheModule2_t)) / entry_size) {
++		return false;
++	}
++	if (version_out != NULL) {
++		*version_out = version;
++	}
++	if (count_out != NULL) {
++		*count_out = count;
++	}
++	return true;
++}
++
++static bool
++mini_tc_module_valid(const TrustCacheModuleBase_t *module, size_t module_size,
++    uint32_t *version_out, uint32_t *count_out)
++{
++	uint32_t version;
++	uint32_t count;
++	size_t entry_size;
++	const uint8_t *entries;
++
++	if (!mini_tc_module_shape(module, module_size, &version, &count)) {
++		return false;
++	}
++	if (version != kTCVersion0) {
++		entry_size = mini_tc_entry_size(version);
++		entries = (const uint8_t *)module + sizeof(TrustCacheModule2_t);
++		for (uint32_t i = 0; i < count; i++) {
++			const uint8_t *entry = entries + (size_t)i * entry_size;
++			uint8_t hash_type = entry[20];
++			if (hash_type < 1 || hash_type > 4) {
++				return false;
++			}
++			if (i != 0 && memcmp(entry - entry_size, entry, kTCEntryHashSize) >= 0) {
++				return false;
++			}
++		}
++	}
++	if (version_out != NULL) {
++		*version_out = version;
++	}
++	if (count_out != NULL) {
++		*count_out = count;
++	}
++	return true;
++}
++
++static const void *
++mini_tc_find(const TrustCache_t *trust_cache, const uint8_t cdhash[kTCEntryHashSize])
++{
++	uint32_t version;
++	uint32_t count;
++	size_t entry_size;
++	const uint8_t *entries;
++	size_t low;
++	size_t high;
++
++	if (trust_cache == NULL ||
++	    !mini_tc_module_shape(trust_cache->module, trust_cache->moduleSize, &version, &count)) {
++		return NULL;
++	}
++	entry_size = mini_tc_entry_size(version);
++	entries = (const uint8_t *)trust_cache->module + sizeof(TrustCacheModule2_t);
++	if (version == kTCVersion0) {
++		for (size_t i = 0; i < count; i++) {
++			if (memcmp(entries + i * entry_size, cdhash, kTCEntryHashSize) == 0) {
++				return entries + i * entry_size;
++			}
++		}
++		return NULL;
++	}
++	low = 0;
++	high = count;
++	while (low < high) {
++		size_t middle = low + (high - low) / 2;
++		const uint8_t *entry = entries + middle * entry_size;
++		int order = memcmp(entry, cdhash, kTCEntryHashSize);
++		if (order == 0) {
++			return entry;
++		}
++		if (order < 0) {
++			low = middle + 1;
++		} else {
++			high = middle;
++		}
++	}
++	return NULL;
++}
++
++static void
++mini_tc_link(TrustCacheRuntime_t *runtime, TCType_t type, TrustCache_t *trust_cache)
++{
++	TrustCache_t **head = NULL;
++
++	if (type == kTCTypeStatic) {
++		head = &runtime->staticTCHead;
++	} else if (type == kTCTypeEngineering) {
++		head = &runtime->engineeringTCHead;
++	} else if (type == kTCTypeLegacy && runtime->mutableRT != NULL) {
++		head = &runtime->mutableRT->loadableTCHead;
++	}
++	if (head != NULL) {
++		trust_cache->prev = NULL;
++		trust_cache->next = *head;
++		if (*head != NULL) {
++			(*head)->prev = trust_cache;
++		}
++		*head = trust_cache;
++	}
++}
++
+ static TCReturn_t
+-mini_tc_loadModule(__unused TrustCacheRuntime_t *runtime, __unused const TCType_t type, __unused TrustCache_t *trustCache,
+-    __unused const uintptr_t dataAddr, __unused const size_t dataSize)
++mini_tc_loadModule(TrustCacheRuntime_t *runtime, const TCType_t type, TrustCache_t *trust_cache,
++    const uintptr_t data_addr, const size_t data_size)
+ {
+-	return buildTCRet(kTCComponentLoadModule, kTCReturnUnsupported, 0);
++	uint32_t version;
++	uint32_t count;
++
++	if (runtime == NULL || trust_cache == NULL || data_addr == 0) {
++		return buildTCRet(kTCComponentLoadModule, kTCReturnInvalidArguments, 1);
++	}
++	if (!mini_tc_module_valid((const TrustCacheModuleBase_t *)data_addr, data_size,
++	    &version, &count)) {
++		return buildTCRet(kTCComponentLoadModule, kTCReturnInvalidModule, 1);
++	}
++	if (trust_cache->module != NULL) {
++		return buildTCRet(kTCComponentLoadModule, kTCReturnDuplicate, 1);
++	}
++	trust_cache->type = type;
++	trust_cache->moduleSize = sizeof(TrustCacheModule2_t) +
++	    (size_t)count * mini_tc_entry_size(version);
++	trust_cache->module = (const TrustCacheModuleBase_t *)data_addr;
++	mini_tc_link(runtime, type, trust_cache);
++	return buildTCRet(kTCComponentLoadModule, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_load(__unused TrustCacheRuntime_t *runtime, __unused TCType_t type, __unused TrustCache_t *trustCache,
+-    __unused const uintptr_t payloadAddr, __unused const size_t payloadSize,
+-    __unused const uintptr_t manifestAddr, __unused const size_t manifestSize)
++mini_tc_load(__unused TrustCacheRuntime_t *runtime, __unused TCType_t type,
++    __unused TrustCache_t *trust_cache, __unused const uintptr_t payload_addr,
++    __unused const size_t payload_size, __unused const uintptr_t manifest_addr,
++    __unused const size_t manifest_size)
+ {
+ 	return buildTCRet(kTCComponentLoad, kTCReturnUnsupported, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_query(__unused const TrustCacheRuntime_t *runtime, __unused TCQueryType_t queryType,
+-    __unused const uint8_t CDHash[kTCEntryHashSize], __unused TrustCacheQueryToken_t *queryToken)
++mini_tc_query(const TrustCacheRuntime_t *runtime, TCQueryType_t query_type,
++    const uint8_t cdhash[kTCEntryHashSize], TrustCacheQueryToken_t *query_token)
+ {
++	const TrustCache_t *heads[3] = { NULL, NULL, NULL };
++	size_t head_count = 0;
++
++	if (runtime == NULL || cdhash == NULL || query_type >= kTCQueryTypeTotal) {
++		return buildTCRet(kTCComponentQuery, kTCReturnInvalidArguments, 0);
++	}
++	if (query_type == kTCQueryTypeAll || query_type == kTCQueryTypeStatic) {
++		heads[head_count++] = runtime->staticTCHead;
++		heads[head_count++] = runtime->engineeringTCHead;
++	}
++	if (query_type == kTCQueryTypeAll || query_type == kTCQueryTypeLoadable) {
++		if (runtime->mutableRT != NULL) {
++			heads[head_count++] = runtime->mutableRT->loadableTCHead;
++		}
++	}
++	for (size_t i = 0; i < head_count; i++) {
++		for (const TrustCache_t *tc = heads[i]; tc != NULL; tc = tc->next) {
++			const void *entry = mini_tc_find(tc, cdhash);
++			if (entry != NULL) {
++				if (query_token != NULL) {
++					query_token->trustCache = tc;
++					query_token->trustCacheEntry = entry;
++				}
++				return buildTCRet(kTCComponentQuery, kTCReturnSuccess, 0);
++			}
++		}
++	}
+ 	return buildTCRet(kTCComponentQuery, kTCReturnNotFound, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_getCapabilities(__unused const TrustCache_t *trustCache, TCCapabilities_t *capabilities)
++mini_tc_getCapabilities(const TrustCache_t *trust_cache, TCCapabilities_t *capabilities)
+ {
+-	*capabilities = 0;
++	uint32_t version;
++
++	if (trust_cache == NULL || trust_cache->module == NULL || capabilities == NULL) {
++		return buildTCRet(kTCComponentModuleCapabilities, kTCReturnInvalidArguments, 0);
++	}
++	version = trust_cache->module->version;
++	if (version == kTCVersion2) {
++		*capabilities = kTCCapabilityHashType | kTCCapabilityFlags |
++		    kTCCapabilityConstraintsCategory;
++	} else if (version == kTCVersion1) {
++		*capabilities = kTCCapabilityHashType | kTCCapabilityFlags;
++	} else {
++		*capabilities = kTCCapabilityNone;
++	}
+ 	return buildTCRet(kTCComponentModuleCapabilities, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_queryGetTCType(__unused const TrustCacheQueryToken_t *queryToken, __unused TCType_t *typeRet)
++mini_tc_queryGetTCType(const TrustCacheQueryToken_t *query_token, TCType_t *type_ret)
+ {
+-	return buildTCRet(kTCComponentQueryTCType, kTCReturnInvalidArguments, 0);
++	if (query_token == NULL || query_token->trustCache == NULL || type_ret == NULL) {
++		return buildTCRet(kTCComponentQueryTCType, kTCReturnInvalidArguments, 0);
++	}
++	*type_ret = query_token->trustCache->type;
++	return buildTCRet(kTCComponentQueryTCType, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_queryGetCapabilities(__unused const TrustCacheQueryToken_t *queryToken, __unused TCCapabilities_t *capabilities)
++mini_tc_queryGetCapabilities(const TrustCacheQueryToken_t *query_token,
++    TCCapabilities_t *capabilities)
+ {
+-	return buildTCRet(kTCComponentModuleCapabilities, kTCReturnInvalidArguments, 0);
++	if (query_token == NULL || query_token->trustCache == NULL) {
++		return buildTCRet(kTCComponentModuleCapabilities, kTCReturnInvalidArguments, 0);
++	}
++	return mini_tc_getCapabilities(query_token->trustCache, capabilities);
+ }
+ 
+ static TCReturn_t
+-mini_tc_queryGetHashType(__unused const TrustCacheQueryToken_t *queryToken, __unused uint8_t *hashTypeRet)
++mini_tc_queryGetHashType(const TrustCacheQueryToken_t *query_token, uint8_t *hash_type_ret)
+ {
+-	return buildTCRet(kTCComponentQueryHashType, kTCReturnInvalidArguments, 0);
++	uint32_t version;
++
++	if (query_token == NULL || query_token->trustCache == NULL ||
++	    query_token->trustCacheEntry == NULL || hash_type_ret == NULL) {
++		return buildTCRet(kTCComponentQueryHashType, kTCReturnInvalidArguments, 0);
++	}
++	version = query_token->trustCache->module->version;
++	*hash_type_ret = version == kTCVersion0 ? 1 :
++	    ((const uint8_t *)query_token->trustCacheEntry)[20];
++	return buildTCRet(kTCComponentQueryHashType, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_queryGetFlags(__unused const TrustCacheQueryToken_t *queryToken, __unused uint64_t *flagsRet)
++mini_tc_queryGetFlags(const TrustCacheQueryToken_t *query_token, uint64_t *flags_ret)
+ {
+-	return buildTCRet(kTCComponentQueryFlags, kTCReturnInvalidArguments, 0);
++	uint32_t version;
++
++	if (query_token == NULL || query_token->trustCache == NULL ||
++	    query_token->trustCacheEntry == NULL || flags_ret == NULL) {
++		return buildTCRet(kTCComponentQueryFlags, kTCReturnInvalidArguments, 0);
++	}
++	version = query_token->trustCache->module->version;
++	*flags_ret = version == kTCVersion0 ? 0 :
++	    ((const uint8_t *)query_token->trustCacheEntry)[21];
++	return buildTCRet(kTCComponentQueryFlags, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_queryGetConstraintCategory(__unused const TrustCacheQueryToken_t *queryToken, __unused uint8_t *constraintCategoryRet)
++mini_tc_queryGetConstraintCategory(const TrustCacheQueryToken_t *query_token,
++    uint8_t *constraint_category_ret)
+ {
+-	return buildTCRet(kTCComponentQueryConstraintCategory, kTCReturnInvalidArguments, 0);
++	uint32_t version;
++
++	if (query_token == NULL || query_token->trustCache == NULL ||
++	    query_token->trustCacheEntry == NULL || constraint_category_ret == NULL) {
++		return buildTCRet(kTCComponentQueryConstraintCategory, kTCReturnInvalidArguments, 0);
++	}
++	version = query_token->trustCache->module->version;
++	*constraint_category_ret = version == kTCVersion2 ?
++	    ((const uint8_t *)query_token->trustCacheEntry)[22] : 0;
++	return buildTCRet(kTCComponentQueryConstraintCategory, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_constructInvalid(__unused TrustCache_t *trustCache, __unused const uint8_t *moduleAddr, __unused size_t moduleSize)
++mini_tc_constructInvalid(TrustCache_t *trust_cache, const uint8_t *module_addr,
++    size_t module_size)
+ {
+-	return buildTCRet(kTCComponentConstructInvalid, kTCReturnUnsupported, 0);
++	uint32_t version;
++	uint32_t count;
++
++	if (trust_cache == NULL || module_addr == NULL ||
++	    !mini_tc_module_valid((const TrustCacheModuleBase_t *)module_addr, module_size,
++	    &version, &count)) {
++		return buildTCRet(kTCComponentConstructInvalid, kTCReturnInvalidArguments, 0);
++	}
++	trust_cache->type = kTCTypeInvalid;
++	trust_cache->moduleSize = sizeof(TrustCacheModule2_t) +
++	    (size_t)count * mini_tc_entry_size(version);
++	trust_cache->module = (const TrustCacheModuleBase_t *)module_addr;
++	return buildTCRet(kTCComponentConstructInvalid, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_checkRuntimeForUUID(__unused const TrustCacheRuntime_t *runtime, __unused const uint8_t checkUUID[kUUIDSize],
+-    __unused const TrustCache_t **trustCacheRet)
++mini_tc_checkRuntimeForUUID(const TrustCacheRuntime_t *runtime,
++    const uint8_t check_uuid[kUUIDSize], const TrustCache_t **trust_cache_ret)
+ {
++	const TrustCache_t *heads[3];
++	size_t head_count = 0;
++
++	if (runtime == NULL || check_uuid == NULL) {
++		return buildTCRet(kTCComponentCheckRuntimeForUUID, kTCReturnInvalidArguments, 0);
++	}
++	heads[head_count++] = runtime->staticTCHead;
++	heads[head_count++] = runtime->engineeringTCHead;
++	if (runtime->mutableRT != NULL) {
++		heads[head_count++] = runtime->mutableRT->loadableTCHead;
++	}
++	for (size_t i = 0; i < head_count; i++) {
++		for (const TrustCache_t *tc = heads[i]; tc != NULL; tc = tc->next) {
++			if (tc->module != NULL &&
++			    memcmp((const uint8_t *)tc->module + 4, check_uuid, kUUIDSize) == 0) {
++				if (trust_cache_ret != NULL) {
++					*trust_cache_ret = tc;
++				}
++				return buildTCRet(kTCComponentCheckRuntimeForUUID, kTCReturnSuccess, 0);
++			}
++		}
++	}
+ 	return buildTCRet(kTCComponentCheckRuntimeForUUID, kTCReturnNotFound, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_extractModule(__unused TrustCache_t *trustCache, __unused const uint8_t *dataAddr, __unused size_t dataSize)
++mini_tc_extractModule(__unused TrustCache_t *trust_cache, __unused const uint8_t *data_addr,
++    __unused size_t data_size)
+ {
+ 	return buildTCRet(kTCComponentExtractModule, kTCReturnUnsupported, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_getModule(__unused const TrustCache_t *trustCache, __unused const uint8_t **moduleAddrRet, __unused size_t *moduleSizeRet)
++mini_tc_getModule(const TrustCache_t *trust_cache, const uint8_t **module_addr_ret,
++    size_t *module_size_ret)
+ {
+-	return buildTCRet(kTCComponentGetModule, kTCReturnUnsupported, 0);
++	if (trust_cache == NULL || trust_cache->module == NULL ||
++	    module_addr_ret == NULL || module_size_ret == NULL) {
++		return buildTCRet(kTCComponentGetModule, kTCReturnInvalidArguments, 0);
++	}
++	*module_addr_ret = (const uint8_t *)trust_cache->module;
++	*module_size_ret = trust_cache->moduleSize;
++	return buildTCRet(kTCComponentGetModule, kTCReturnSuccess, 0);
+ }
+ 
+ static TCReturn_t
+-mini_tc_getUUID(__unused const TrustCache_t *trustCache, __unused uint8_t returnUUID[kUUIDSize])
++mini_tc_getUUID(const TrustCache_t *trust_cache, uint8_t return_uuid[kUUIDSize])
+ {
+-	return buildTCRet(kTCComponentGetUUID, kTCReturnUnsupported, 0);
++	if (trust_cache == NULL || trust_cache->module == NULL || return_uuid == NULL) {
++		return buildTCRet(kTCComponentGetUUID, kTCReturnInvalidArguments, 0);
++	}
++	memcpy(return_uuid, (const uint8_t *)trust_cache->module + 4, kUUIDSize);
++	return buildTCRet(kTCComponentGetUUID, kTCReturnSuccess, 0);
+ }
+ 
+ static const amfi_t miniamfi = {

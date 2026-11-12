@@ -1,0 +1,114 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7297,6 +7297,9 @@
+ volatile int native_owner_cache_native_union = 0;
+ volatile dev_t native_owner_cache_selected_device = NODEV;
+ volatile dev_t native_owner_cache_mounted_device = NODEV;
++volatile int native_owner_cache_shared_cache_error = -1;
++volatile uint64_t native_owner_cache_shared_cache_size = 0;
++volatile uint32_t native_owner_cache_shared_cache_mode = 0;
+ char native_owner_cache_device_path[64];
+ void native_owner_cache_checkpoint(int, int);
+ __attribute__((noinline)) void
+@@ -7472,7 +7475,18 @@
+ 	    vfs_context_current());
+ 	printf("PONG APFS: shared cache path probe error=%d vnode=%p\n",
+ 	    shared_cache_error, shared_cache_vp);
+-	if (shared_cache_vp) vnode_put(shared_cache_vp);
++	native_owner_cache_shared_cache_error = shared_cache_error;
++	if (shared_cache_vp) {
++		struct vnode_attr va;
++		VATTR_INIT(&va);
++		VATTR_WANTED(&va, va_mode);
++		VATTR_WANTED(&va, va_data_size);
++		if (vnode_getattr(shared_cache_vp, &va, vfs_context_current()) == 0) {
++			native_owner_cache_shared_cache_mode = va.va_mode;
++			native_owner_cache_shared_cache_size = va.va_data_size;
++		}
++		vnode_put(shared_cache_vp);
++	}
+ 	printf("PONG APFS: launchd shared cache directory=%s\n",
+ 	    environment + sizeof("DYLD_SHARED_CACHE_DIR=") - 1);
+ #endif
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1893,6 +1893,40 @@
+ #endif /* DEVELOPMENT */
+ 
+ 	char *exit_reason_desc = exit_reason_get_string_desc(p->p_exit_reason);
++
++#if defined(PONG)
++	extern volatile int native_owner_cache_stage;
++	extern volatile int native_owner_cache_status;
++	extern volatile int native_owner_cache_mount_status;
++	extern volatile int native_owner_cache_readonly;
++	extern volatile int native_owner_cache_authorized;
++	extern volatile dev_t native_owner_cache_bound_root_device;
++	extern volatile dev_t native_owner_cache_selected_device;
++	extern volatile dev_t native_owner_cache_mounted_device;
++	extern volatile int native_owner_cache_shared_cache_error;
++	extern volatile uint64_t native_owner_cache_shared_cache_size;
++	extern volatile uint32_t native_owner_cache_shared_cache_mode;
++	extern volatile int native_owner_cache_root_recheck;
++	extern char native_owner_cache_device_path[64];
++	extern volatile int native_owner_data_status;
++	extern volatile int native_owner_data_stage;
++	extern volatile int native_owner_data_readonly;
++	extern volatile dev_t native_owner_data_device;
++	extern char native_owner_data_device_path[64];
++	printf("PONG APFS STATE: stage=%d status=%d mount_status=%d auth=%d recheck=%d ro=%d "
++	    "root=%x selected=%x mounted=%x path=%s "
++	    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s\n",
++	    native_owner_cache_stage, native_owner_cache_status,
++	    native_owner_cache_mount_status, native_owner_cache_authorized,
++	    native_owner_cache_root_recheck, native_owner_cache_readonly,
++	    (unsigned)native_owner_cache_bound_root_device,
++	    (unsigned)native_owner_cache_selected_device,
++	    (unsigned)native_owner_cache_mounted_device,
++	    native_owner_cache_device_path,
++	    native_owner_data_status, native_owner_data_stage,
++	    native_owner_data_readonly, (unsigned)native_owner_data_device,
++	    native_owner_data_device_path);
++#endif
+ 
+ 	if (p->p_exit_reason == OS_REASON_NULL) {
+ 		printf("pid %d exited -- no exit reason available -- (signal %d, exit %d)\n",
+@@ -1904,7 +1938,7 @@
+ 	}
+ 
+ 	const char *prefix_str;
+-	char prefix_str_buf[128];
++	char prefix_str_buf[512];
+ 
+ 	if (p == initproc) {
+ 		if (strnstr(p->p_name, "preinit", sizeof(p->p_name))) {
+@@ -1912,7 +1946,29 @@
+ 		} else if (initproc_spawned) {
+ 			prefix_str = "initproc exited";
+ 		} else {
++#if defined(PONG)
++			snprintf(prefix_str_buf, sizeof(prefix_str_buf),
++			    "initproc failed to start [apfs stage=%d status=%d mount=%d auth=%d recheck=%d ro=%d "
++			    "root=%x selected=%x mounted=%x path=%s "
++			    "cache_err=%d cache_size=%llu cache_mode=%o "
++			    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s]",
++			    native_owner_cache_stage, native_owner_cache_status,
++			    native_owner_cache_mount_status, native_owner_cache_authorized,
++			    native_owner_cache_root_recheck, native_owner_cache_readonly,
++			    (unsigned)native_owner_cache_bound_root_device,
++			    (unsigned)native_owner_cache_selected_device,
++			    (unsigned)native_owner_cache_mounted_device,
++			    native_owner_cache_device_path,
++			    native_owner_cache_shared_cache_error,
++			    (unsigned long long)native_owner_cache_shared_cache_size,
++			    native_owner_cache_shared_cache_mode,
++			    native_owner_data_status, native_owner_data_stage,
++			    native_owner_data_readonly, (unsigned)native_owner_data_device,
++			    native_owner_data_device_path);
++			prefix_str = prefix_str_buf;
++#else
+ 			prefix_str = "initproc failed to start";
++#endif
+ 		}
+ 	} else {
+ 		/* For processes that aren't launchd, just use the process name and pid */

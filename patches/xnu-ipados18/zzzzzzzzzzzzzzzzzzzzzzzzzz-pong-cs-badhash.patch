@@ -1,0 +1,68 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -122,6 +122,9 @@
+ 
+ extern int cs_debug;
+ volatile int pong_cs_stage = -1;
++volatile uint32_t pong_cs_bad_block = 0;
++volatile uint32_t pong_cs_expected0 = 0;
++volatile uint32_t pong_cs_actual0 = 0;
+ 
+ #define PAGE_SHIFT_4K           (12)
+ 
+@@ -5987,6 +5990,13 @@
+ 			md->cs_final(digest, &ctx);
+ 			if (bcmp(expected, digest, md->cs_size)) {
+ 				pong_cs_stage = 108;
++				pong_cs_bad_block = (uint32_t)(offset >> 14);
++				pong_cs_expected0 = ((uint32_t)expected[0] << 24) |
++				    ((uint32_t)expected[1] << 16) |
++				    ((uint32_t)expected[2] << 8) | expected[3];
++				pong_cs_actual0 = ((uint32_t)digest[0] << 24) |
++				    ((uint32_t)digest[1] << 16) |
++				    ((uint32_t)digest[2] << 8) | digest[3];
+ 				os_atomic_inc(&cs_validate_page_bad_hash, relaxed);
+ 				error = EBADEXEC;
+ 				goto out;
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1909,18 +1909,22 @@
+ 	extern volatile int native_owner_cache_root_recheck;
+ 	extern volatile int pong_cs_fcntl_error;
+ 	extern volatile int pong_cs_stage;
++	extern volatile uint32_t pong_cs_bad_block;
++	extern volatile uint32_t pong_cs_expected0;
++	extern volatile uint32_t pong_cs_actual0;
+ 	extern char native_owner_cache_device_path[64];
+ 	extern volatile int native_owner_data_status;
+ 	extern volatile int native_owner_data_stage;
+ 	extern volatile int native_owner_data_readonly;
+ 	extern volatile dev_t native_owner_data_device;
+ 	extern char native_owner_data_device_path[64];
+-	printf("PONG APFS STATE: stage=%d status=%d mount_status=%d auth=%d recheck=%d cs_err=%d cs_stage=%d ro=%d "
++	printf("PONG APFS STATE: stage=%d status=%d mount_status=%d auth=%d recheck=%d cs_err=%d cs_stage=%d cs_blk=%u cs_exp=%08x cs_act=%08x ro=%d "
+ 	    "root=%x selected=%x mounted=%x path=%s "
+ 	    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s\n",
+ 	    native_owner_cache_stage, native_owner_cache_status,
+ 	    native_owner_cache_mount_status, native_owner_cache_authorized,
+ 	    native_owner_cache_root_recheck, pong_cs_fcntl_error, pong_cs_stage,
++	    pong_cs_bad_block, pong_cs_expected0, pong_cs_actual0,
+ 	    native_owner_cache_readonly,
+ 	    (unsigned)native_owner_cache_bound_root_device,
+ 	    (unsigned)native_owner_cache_selected_device,
+@@ -1951,13 +1955,14 @@
+ 		} else {
+ #if defined(PONG)
+ 			snprintf(prefix_str_buf, sizeof(prefix_str_buf),
+-			    "initproc failed to start [apfs stage=%d status=%d mount=%d auth=%d recheck=%d cs_err=%d cs_stage=%d ro=%d "
++			    "initproc failed to start [apfs stage=%d status=%d mount=%d auth=%d recheck=%d cs_err=%d cs_stage=%d cs_blk=%u cs_exp=%08x cs_act=%08x ro=%d "
+ 			    "root=%x selected=%x mounted=%x path=%s "
+ 			    "cache_err=%d cache_size=%llu cache_mode=%o "
+ 			    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s]",
+ 			    native_owner_cache_stage, native_owner_cache_status,
+ 			    native_owner_cache_mount_status, native_owner_cache_authorized,
+ 			    native_owner_cache_root_recheck, pong_cs_fcntl_error, pong_cs_stage,
++			    pong_cs_bad_block, pong_cs_expected0, pong_cs_actual0,
+ 			    native_owner_cache_readonly,
+ 			    (unsigned)native_owner_cache_bound_root_device,
+ 			    (unsigned)native_owner_cache_selected_device,

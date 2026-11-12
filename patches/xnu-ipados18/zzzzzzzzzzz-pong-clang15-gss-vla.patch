@@ -1,0 +1,20 @@
+diff --git a/bsd/nfs/gss/gss_krb5_mech.c b/bsd/nfs/gss/gss_krb5_mech.c
+index 3c23e8e..18ab34a 100644
+--- a/bsd/nfs/gss/gss_krb5_mech.c
++++ b/bsd/nfs/gss/gss_krb5_mech.c
+@@ -1917,6 +1917,7 @@ gss_krb5_3des_token_get(gss_ctx_id_t ctx, gss_buffer_t intok,
+ 	uint8_t *block = tokbody->SND_SEQ;
+ 
+ 	assert(blocksize == sizeof(tokbody->SND_SEQ));
++	assert(hash->length >= cctx->digest_size);
+ 	cccbc_iv_decl(blocksize, iv);
+ 	cccbc_ctx_decl(cctx->dec_mode->size, dec_ctx);
+ 	cccbc_set_iv(cctx->dec_mode, iv, tokbody->Hash);
+@@ -1936,7 +1937,6 @@ gss_krb5_3des_token_get(gss_ctx_id_t ctx, gss_buffer_t intok,
+ 
+ 	lctx->recv_seq = ntohl(seq);
+ 
+-	assert(hash->length >= cctx->digest_size);
+ 	memcpy(hash->value, tokbody->Hash, cctx->digest_size);
+ 
+ 	return 0;

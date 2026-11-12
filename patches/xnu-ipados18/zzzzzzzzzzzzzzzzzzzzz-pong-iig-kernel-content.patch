@@ -1,0 +1,15 @@
+--- a/iokit/Kernel/IOUserServer.cpp
++++ b/iokit/Kernel/IOUserServer.cpp
+@@ -2408,6 +2408,12 @@
+ 
+ 	assert(rpc.sendSize >= (sizeof(IORPCMessageMach) + sizeof(IORPCMessage)));
+ 	message = rpc.kernelContent;
++	if (!message && rpc.message) {
++		/* Pong: the Xcode iig wrapper does not fill kernelContent for
++		 * kernel-local IIG calls.  Derive it from the local Mach message
++		 * so IOService::Dispatch() can process the request. */
++		message = IORPCMessageFromMach(rpc.message, false);
++	}
+ 	if (!message) {
+ 		return kIOReturnIPCError;
+ 	}

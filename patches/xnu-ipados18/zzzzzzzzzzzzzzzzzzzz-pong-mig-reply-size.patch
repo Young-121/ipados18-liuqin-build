@@ -1,0 +1,21 @@
+--- a/osfmk/kern/ipc_kobject.c
++++ b/osfmk/kern/ipc_kobject.c
+@@ -270,11 +270,14 @@
+ 					    <=, IPC_KOBJECT_RDESC_MAX);
+ 				} else {
+ 					/*
+-					 * Allocating a larger-than-needed kmsg creates hole for
+-					 * inlined kmsgs (IKM_TYPE_ALL_INLINED) during copyout.
+-					 * Disallow that.
++					 * Pong: the Xcode 15 MIG omits max_reply_msg for
++					 * some kernel server routines.  The generated reply
++					 * descriptors are still present; use the subsystem
++					 * maximum and the descriptor maximum so the kernel can
++					 * boot while a newer MIG is sourced.
+ 					 */
+-					panic("kroutine must have precise size %d %d", mig_e[i]->start, j);
++					mig_buckets[pos].kreply_size = mig_e[i]->maxsize;
++					mig_buckets[pos].kreply_desc_cnt = IPC_KOBJECT_RDESC_MAX;
+ 				}
+ 
+ 				mig_buckets[pos].kobjidx = KOBJ_IDX_NOT_SET;

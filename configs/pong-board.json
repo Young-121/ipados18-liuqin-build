@@ -1,0 +1,41 @@
+{
+  "board": "pong",
+  "physical_model": "Nothing Phone (2)",
+  "memory": "configs/pong-memory-sm8475.json",
+  "display": {
+    "width": 1080,
+    "height": 2412,
+    "scale": 3,
+    "backlight_config": "configs/pong-display-sm8475.json"
+  },
+  "identity": {
+    "model": "iPhone17,1",
+    "compatible": ["J171AP", "iPhone17,1", "qcom,sm8475"],
+    "target_type": "J171",
+    "target_sub_type": "J171AP",
+    "product_name": "iPhone 16 Pro",
+    "product_description": "iPhone 16 Pro",
+    "artwork_device_idiom": "phone",
+    "artwork_device_subtype": 2622,
+    "artwork_scale_factor": 3,
+    "device_perf_memory_class": 3,
+    "thin_bezel": 1,
+    "compatible_device_fallback": "iPhone17,1"
+  },
+  "touch": {
+    "node": "pong-touch",
+    "compatible": "pong,goodix-berlin-d",
+    "spi_base": "0x990000",
+    "pins": [16, 17, 18, 19, 21, 20],
+    "max_x": 1080,
+    "max_y": 2412
+  },
+  "boot": {
+    "comment": "The device boots the UEFI firmware from its own partition; the boot image carries the payload only.",
+    "label": "Nothing Phone (2) / Pong / SM8475",
+    "image": "pong-xnu-initial.img",
+    "kernel_slot": "empty",
+    "dram_size": "0x300000000",
+    "window_size": "0x100000000"
+  }
+}

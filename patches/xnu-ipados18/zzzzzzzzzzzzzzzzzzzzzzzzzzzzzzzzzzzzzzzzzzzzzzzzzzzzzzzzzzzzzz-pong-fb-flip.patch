@@ -1,0 +1,398 @@
+--- a/iokit/Kernel/MiniIOMobileFramebuffer.cpp
++++ b/iokit/Kernel/MiniIOMobileFramebuffer.cpp
+@@ -174,7 +174,283 @@
+  * touch takes to show (tools/latency.py; the touch's own lines: bsd/dev/redwood_input.c).
+  */
+ static TUNABLE(uint32_t, gTouchLat, "touch_lat", 0);
++
++/*
++ * `pong_fb_flip=1`: two framebuffers for a panel the display controller
++ * fetches by itself. A frame is written into the buffer the pipe is not
++ * fetching, the pipe's source address is repointed and the control path is
++ * flushed; the buffer before is written again only once the flush is seen
++ * taken. `pong_fb_mdp=PA` is the display subsystem (sm8450: mdss 0xae00000,
++ * pipes at +0x5000, control paths at +0x16000). `pong_fb_flip_gap` is the
++ * distance to the second buffer inside the boot loader's display reservation.
++ * Three flips in a row not taken fall back to the boot loader's buffer alone.
++ * Ported from HakiOS/mayfly (cotunjr/hakios-xnu-kernel, fb_flip).
++ */
++static TUNABLE(uint32_t, gPongFlip, "pong_fb_flip", 0);
++static TUNABLE(uint64_t, gPongMdpPA, "pong_fb_mdp", 0xae00000);
++static TUNABLE(uint32_t, gPongFlipGap, "pong_fb_flip_gap", 0x1500000);
++static TUNABLE(uint32_t, gPongFlipExtra, "pong_fb_flip_flush", 0);
++/* `pong_fb_sample=1`: a bounded colour map of the composited layer into the
++ * console log. 32 columns of RGB averages per sampled row, so a barrier in the
++ * picture (colour bars) can be located and measured without a screenshot. */
++static TUNABLE(uint32_t, gPongSample, "pong_fb_sample", 0);
++/* `pong_fb_blend=0`: keep forcing every copied pixel opaque. The composited
++ * surface of a sheet (the notification centre) carries a real alpha channel;
++ * its transparent pixels hold whatever the GPU left there, so forcing alpha
++ * showed that as green/red bars. Blend with the frame below instead. */
++static TUNABLE(uint32_t, gPongBlend, "pong_fb_blend", 1);
++
++extern "C" vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern "C" vm_offset_t ml_io_map_wcomb(vm_offset_t, vm_size_t);
++
++#define PONG_FLIP_PIPES         8
++#define PONG_FLIP_CTLS          6
++#define PONG_FLIP_SRC0_ADDR     0x14
++#define PONG_FLIP_CTL_FLUSH     0x18
++#define PONG_FLIP_TAKEN_MS      50
++
++static const uint32_t kPongFlipPipe[PONG_FLIP_PIPES] = { 0x5000, 0x7000, 0x9000, 0xb000, 0x25000, 0x27000, 0x29000, 0x2b000 };
++static const char * const kPongFlipPipeName[PONG_FLIP_PIPES] = { "vig0", "vig1", "vig2", "vig3", "dma0", "dma1", "dma2", "dma3" };
++static const uint32_t kPongFlipPipeFlush[PONG_FLIP_PIPES] = { 1u << 0, 1u << 1, 1u << 2, 1u << 18, 1u << 11, 1u << 12, 1u << 24, 1u << 25 };
++static const uint32_t kPongFlipCtl[PONG_FLIP_CTLS] = { 0x16000, 0x17000, 0x18000, 0x19000, 0x1a000, 0x1b000 };
++
++static struct {
++	bool            on;
++	vm_offset_t     mdp;
++	uint32_t        pipe;                   /* first pipe that fetches the frame (log) */
++	uint32_t        pipes;                  /* every pipe that fetches it (dual DSI) */
++	uint32_t        ctls;
++	uint32_t        flush;
++	uint64_t        pa[2];
++	uint8_t *       va[2];
++	unsigned        front;
++	bool            pending;
++	uint32_t        flips, waited, misses, missesInRow;
++	uint64_t        waitAbs;
++} gPongFlipper;
++
++static inline uint32_t
++pongFlipRd(uint32_t offset)
++{
++	return *(volatile uint32_t *) (gPongFlipper.mdp + offset);
++}
++
++static inline void
++pongFlipWr(uint32_t offset, uint32_t value)
++{
++	*(volatile uint32_t *) (gPongFlipper.mdp + offset) = value;
++	__asm__ volatile("dsb sy" ::: "memory");
++}
++
++static uint32_t
++pongFlipPending(void)
++{
++	uint32_t pending = 0;
++
++	for (unsigned c = 0; c < PONG_FLIP_CTLS; c++) {
++		if (gPongFlipper.ctls & (1u << c)) {
++			pending |= pongFlipRd(kPongFlipCtl[c] + PONG_FLIP_CTL_FLUSH) & gPongFlipper.flush;
++		}
++	}
++	return pending;
++}
++
++static void
++pongFlipPoint(unsigned buffer)
++{
++	/* Dual-DSI panels have one pipe per half, both fetching the same base:
++	 * repoint every one of them before the single flush below, or one half
++	 * keeps the old frame (left/right tearing). */
++	for (unsigned p = 0; p < PONG_FLIP_PIPES; p++) {
++		if (gPongFlipper.pipes & (1u << p)) {
++			pongFlipWr(kPongFlipPipe[p] + PONG_FLIP_SRC0_ADDR, (uint32_t) gPongFlipper.pa[buffer]);
++		}
++	}
++	for (unsigned c = 0; c < PONG_FLIP_CTLS; c++) {
++		if (gPongFlipper.ctls & (1u << c)) {
++			pongFlipWr(kPongFlipCtl[c] + PONG_FLIP_CTL_FLUSH, gPongFlipper.flush);
++		}
++	}
++	gPongFlipper.front = buffer;
++	gPongFlipper.pending = true;
++	gPongFlipper.flips++;
++}
+ 
++/* Until the last flip is taken; then the buffer that is not the front one is free. */
++static bool
++pongFlipWaitTaken(void)
++{
++	uint64_t began = mach_absolute_time(), deadline;
++
++	if (!gPongFlipper.pending) {
++		return true;
++	}
++	clock_interval_to_deadline(PONG_FLIP_TAKEN_MS, kMillisecondScale, &deadline);
++	while (pongFlipPending() != 0) {
++		if (mach_absolute_time() >= deadline) {
++			gPongFlipper.misses++;
++			if (++gPongFlipper.missesInRow >= 3) {
++				IOLog("MiniIOMobileFramebuffer: flip: three flips running not taken in %u ms (flush still %#x): "
++				    "ONE BUFFER AGAIN, the boot loader's\n", PONG_FLIP_TAKEN_MS, pongFlipPending());
++				pongFlipPoint(0);
++				gPongFlipper.pending = false;
++				gPongFlipper.on = false;
++			}
++			return false;
++		}
++		IODelay(100);
++	}
++	gPongFlipper.waitAbs += mach_absolute_time() - began;
++	gPongFlipper.waited++;
++	gPongFlipper.missesInRow = 0;
++	gPongFlipper.pending = false;
++	return true;
++}
++
++static void
++pongFlipSetup(uint8_t * base, uint32_t rowBytes, uint32_t height)
++{
++	uint64_t size = (uint64_t) rowBytes * height;
++	uint64_t physical = vinfo.v_physaddr;
++
++	if (!gPongFlip) {
++		return;
++	}
++	if (!physical) {
++		physical = (uint64_t) vinfo.v_baseaddr & ~3ULL;
++	}
++	if (!physical || size > gPongFlipGap) {
++		IOLog("MiniIOMobileFramebuffer: flip: no (framebuffer at %#llx, %llu bytes, the gap %#x)\n",
++		    physical, size, gPongFlipGap);
++		return;
++	}
++	gPongFlipper.mdp = ml_io_map((vm_offset_t) gPongMdpPA, 0x30000);
++	if (!gPongFlipper.mdp) {
++		IOLog("MiniIOMobileFramebuffer: flip: no (mdss %#llx did not map)\n", (unsigned long long) gPongMdpPA);
++		return;
++	}
++	gPongFlipper.pa[0] = physical;
++	gPongFlipper.pa[1] = physical + gPongFlipGap;
++	gPongFlipper.pipe = PONG_FLIP_PIPES;
++	gPongFlipper.pipes = 0;
++	for (unsigned p = 0; p < PONG_FLIP_PIPES; p++) {
++		uint32_t at = pongFlipRd(kPongFlipPipe[p] + PONG_FLIP_SRC0_ADDR);
++
++		IOLog("MiniIOMobileFramebuffer: flip: pipe %s source %#x\n", kPongFlipPipeName[p], at);
++		if (at == (uint32_t) gPongFlipper.pa[0]) {
++			gPongFlipper.pipes |= 1u << p;
++			if (gPongFlipper.pipe == PONG_FLIP_PIPES) {
++				gPongFlipper.pipe = p;
++			}
++			gPongFlipper.flush |= kPongFlipPipeFlush[p];
++		}
++	}
++	for (unsigned c = 0; c < PONG_FLIP_CTLS; c++) {
++		uint32_t ctl = kPongFlipCtl[c];
++		uint32_t layers = pongFlipRd(ctl + 0x00) | pongFlipRd(ctl + 0x04) | pongFlipRd(ctl + 0x08) |
++		    pongFlipRd(ctl + 0x0c) | pongFlipRd(ctl + 0x10) | pongFlipRd(ctl + 0x24);
++
++		if (layers != 0) {
++			gPongFlipper.ctls |= 1u << c;
++		}
++	}
++	if (!gPongFlipper.pipes || gPongFlipper.ctls == 0) {
++		IOLog("MiniIOMobileFramebuffer: flip: no pipe fetches %#llx or no control path has layers (%#x): one buffer\n",
++		    (unsigned long long) gPongFlipper.pa[0], gPongFlipper.ctls);
++		return;
++	}
++	gPongFlipper.flush |= gPongFlipExtra;
++	gPongFlipper.va[0] = base;
++	gPongFlipper.va[1] = (uint8_t *) ml_io_map_wcomb((vm_offset_t) gPongFlipper.pa[1], (vm_size_t) size);
++	if (gPongFlipper.va[1] == nullptr) {
++		IOLog("MiniIOMobileFramebuffer: flip: the second buffer did not map\n");
++		return;
++	}
++	/* Nothing in the boot loader's splash may show through a region the
++	 * compositor does not paint this frame (colour bars in the lower half).
++	 * Start both buffers black; the first composed frame paints the rest. */
++	memset(gPongFlipper.va[0], 0, (size_t) size);
++	memset(gPongFlipper.va[1], 0, (size_t) size);
++	gPongFlipper.front = 0;
++	gPongFlipper.on = true;
++	IOLog("MiniIOMobileFramebuffer: flip: TWO BUFFERS, %#llx and %#llx, pipes 0x%x (first %s), control paths %#x, flush %#x\n",
++	    (unsigned long long) gPongFlipper.pa[0], (unsigned long long) gPongFlipper.pa[1],
++	    gPongFlipper.pipes, kPongFlipPipeName[gPongFlipper.pipe], gPongFlipper.ctls, gPongFlipper.flush);
++}
++
++/* Present calls, not absolutetime: this timer's ticks are not nanoseconds. */
++static uint32_t gPongSampleFrame;
++
++static bool
++pongSampleDue(unsigned * dumps, uint32_t * nextFrame)
++{
++	if (*dumps >= 10) return false;
++	if (gPongSampleFrame < *nextFrame) return false;
++	*nextFrame = gPongSampleFrame + 240;
++	(*dumps)++;
++	return true;
++}
++
++static void
++pongSamplePixels(const char * tag, const uint8_t * base, uint32_t w, uint32_t h,
++    uint32_t stride, uint32_t swap, unsigned dump)
++{
++	if (base == nullptr || w == 0 || h == 0 || stride < (uint64_t) w * 4) return;
++	IOLog("MiniIOMobileFramebuffer: sample %s %u swap %u %ux%u stride %u\n",
++	    tag, dump, swap, w, h, stride);
++	for (unsigned k = 0; k <= 128; k++) {
++		const uint32_t y = (uint32_t) ((uint64_t) k * (h - 1) / 128);
++		const uint32_t * row = (const uint32_t *) (base + (size_t) y * stride);
++		uint64_t r = 0, g = 0, b = 0, a = 0;
++		unsigned n = 0, clear = 0;
++		for (uint32_t x = 0; x < w; x += 8) {
++			const uint32_t p = row[x];
++			b += p & 0xff;
++			g += (p >> 8) & 0xff;
++			r += (p >> 16) & 0xff;
++			a += (p >> 24) & 0xff;
++			if ((p & 0xff000000u) == 0) clear++;
++			n++;
++		}
++		IOLog("SMP%s %u y%u r%02x g%02x b%02x a%02x c%u\n", tag, dump, y,
++		    unsigned(r / n), unsigned(g / n), unsigned(b / n), unsigned(a / n), clear);
++	}
++}
++
++/* The layer of the swap before: a frame older, so the GPU has finished it. */
++static void
++pongSampleSurface(MiniIOSurface * s, uint32_t swap)
++{
++	static unsigned dumps;
++	static uint32_t nextFrame = 120;
++
++	if (!gPongSample || s == nullptr || s->pixels() == nullptr) return;
++	if (!pongSampleDue(&dumps, &nextFrame)) return;
++	IOLog("MiniIOMobileFramebuffer: layer swap %u %ux%u stride %u fmt %08x alloc %u tiled %u\n",
++	    swap, s->info.width, s->info.height, s->info.bytesPerRow, s->info.pixelFormat,
++	    s->info.allocSize, unsigned(s->shared() != nullptr && s->shared()->tiled != 0));
++	pongSamplePixels("L", s->pixels(), s->info.width, s->info.height, s->info.bytesPerRow,
++	    swap, dumps);
++}
++
++static inline void
++pongBlendPixel(uint32_t * to, uint32_t s)
++{
++	const uint32_t a = s >> 24;
++
++	if (a == 0) return;                     /* nothing drawn here: keep the frame below */
++	if (a == 0xff) {
++		*to = s;
++		return;
++	}
++	const uint32_t d = *to, ia = 255 - a;
++	const uint32_t r = (((s >> 16) & 0xff) * a + ((d >> 16) & 0xff) * ia) / 255;
++	const uint32_t g = (((s >> 8) & 0xff) * a + ((d >> 8) & 0xff) * ia) / 255;
++	const uint32_t b = ((s & 0xff) * a + (d & 0xff) * ia) / 255;
++
++	*to = 0xff000000u | r << 16 | g << 8 | b;
++}
++
+ static inline uint64_t
+ micros(uint64_t absolute)
+ {
+@@ -434,6 +710,7 @@
+ 	gPanelRows = fPanelHeight;
+ 	IOLog("MiniIOMobileFramebuffer: vinfo panel %ux%u stride %u base=%p\n",
+ 	    fPanelWidth, fPanelHeight, fRowBytes, (void *)vinfo.v_baseaddr);
++	pongFlipSetup(fBase, fRowBytes, fPanelHeight);
+ 	{
+ 		uint32_t pantest = 0;
+ 		if (PE_parse_boot_argn("pong_panel_test", &pantest, sizeof(pantest)) && pantest != 0) {
+@@ -633,7 +910,11 @@
+ 		if (job->unscaled) {
+ 			/* not scaled at all */
+ 			const uint32_t *row = (const uint32_t *)(pixels + (size_t)(sy + y - py0) * stride) + sx;
+-			for (int32_t x=0;x<sw;x++) to[px0+x]=row[x] | 0xff000000u;
++			if (!gPongBlend) {
++				for (int32_t x=0;x<sw;x++) to[px0+x]=row[x] | 0xff000000u;
++			} else {
++				for (int32_t x=0;x<sw;x++) pongBlendPixel(to + px0 + x, row[x]);
++			}
+ 			continue;
+ 		}
+ 		if (filter) {
+@@ -680,12 +961,16 @@
+ 
+ 			for (uint32_t i = 0, n = (uint32_t) (cx1 - cx0); i < n; i++) {
+ 				uint32_t c = column[i], w = weights[i], a = from[c];
++				uint32_t value = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
+ 
+-				out[i] = (w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w)) | 0xff000000u;
++				if (gPongBlend) pongBlendPixel(out + i, value);
++				else out[i] = value | 0xff000000u;
+ 			}
+ 		} else {
+ 			for (int32_t x = cx0; x < cx1; x++) {
+-				to[x] = from[fColumn[x]] | 0xff000000u;
++				uint32_t value = from[fColumn[x]];
++				if (gPongBlend) pongBlendPixel(to + x, value);
++				else to[x] = value | 0xff000000u;
+ 			}
+ 		}
+ 	}
+@@ -1101,8 +1386,25 @@
+ 			fStatOnBeat++;
+ 			fStatBeatWait += mach_absolute_time() - began;
+ 			began = mach_absolute_time();
++		}
++	}
++	if (gPongSample) gPongSampleFrame++;
++	if (gPongFlipper.on && gPongSample) {
++		/* The buffer being scanned out: exactly what the panel shows now. */
++		static unsigned fbDumps;
++		static uint32_t fbNext = 120;
++		if (pongSampleDue(&fbDumps, &fbNext)) {
++			pongSamplePixels("F", gPongFlipper.va[gPongFlipper.front],
++			    fPanelWidth, fPanelHeight, fRowBytes, swapWord(swap, SWAP_ID), fbDumps);
+ 		}
+ 	}
++	if (gPongFlipper.on) {
++		pongFlipWaitTaken();
++		fStatOnBeat++;
++		fStatBeatWait += mach_absolute_time() - began;
++		began = mach_absolute_time();
++		fBase = gPongFlipper.on ? gPongFlipper.va[1 - gPongFlipper.front] : gPongFlipper.va[0];
++	}
+ 	shown = began;
+     if (!surfacesReady) { fStatLost++; return kIOReturnNotReady; }
+     IOLockLock(fLock);
+@@ -1128,6 +1430,8 @@
+ 	 * No CPU writes may race an outstanding GPU copy after a timeout. */
+ 	bool gpuFrame=false;
+ #if XNU_PONG_ADRENO_PLATFORM
++	if(gPongFlipper.on) goto pongFlipCompose;
++	{
+ 	if(!swapWord(swap,SWAP_SURFACE(0)) && !swapWord(swap,SWAP_SURFACE(1)) &&
+ 	   !swapWord(swap,SWAP_SURFACE(2)) && !swapWord(swap,SWAP_SURFACE(3)))pong_scanout_idle();
+ 	if(pong_scanout_quarantined()){IOLockUnlock(fLock);return kIOReturnNotReady;}
+@@ -1156,8 +1460,10 @@
+ 	/* A delivered GPU copy whose completion is uncertain must never race a
+ 	 * CPU write. Result 2 poisons the handoff; result 0 permits CPU fallback. */
+ 	if(pong_scanout_quarantined()){IOLockUnlock(fLock);return kIOReturnNotReady;}
++	}
+ #endif
+-	if(fGpuOnly && !gpuFrame && !pong_scanout_fallback()) {
++pongFlipCompose:
++	if(!gPongFlipper.on && fGpuOnly && !gpuFrame && !pong_scanout_fallback()) {
+ 		static unsigned missed=0;
+ 		if(missed++<4)IOLog("PONG GPU ONLY: no completed GPU frame; CPU composition disabled\n");
+ 		IOLockUnlock(fLock);return kIOReturnNotReady;
+@@ -1200,9 +1506,24 @@
+ 		if (s == NULL) {
+ 			continue;
+ 		}
++		if (layer == 0 && !gpuFrame) {
++			static MiniIOSurface * previous;
++			static uint32_t previousSwap;
++			if (previous != nullptr) {
++				pongSampleSurface(previous, previousSwap);
++				previous->release();
++				previous = nullptr;
++			}
++			s->retain();
++			previous = s;
++			previousSwap = swapWord(swap, SWAP_ID);
++		}
+ 		if (s->info.bytesPerElement == 4 && s->info.planeCount == 0) {
+ 			if (!gpuFrame) drawLayer(s, src, dst);
+ 		}
++	}
++	if (gPongFlipper.on) {
++		pongFlipPoint(1 - gPongFlipper.front);
+ 	}
+ 	drawn = mach_absolute_time();
+ 	fSwapsShown++;

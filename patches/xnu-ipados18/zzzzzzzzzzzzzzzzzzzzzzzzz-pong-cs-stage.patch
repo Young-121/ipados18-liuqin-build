@@ -1,0 +1,192 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -121,6 +121,7 @@
+     ZC_READONLY | ZC_ZFREE_CLEARMEM);
+ 
+ extern int cs_debug;
++volatile int pong_cs_stage = -1;
+ 
+ #define PAGE_SHIFT_4K           (12)
+ 
+@@ -4798,6 +4799,7 @@
+ 	 * We initialize a temporary blob whose contents are then copied into an RO
+ 	 * blob which we allocate from the read-only allocator.
+ 	 */
++	pong_cs_stage = 1;
+ 	error = cs_blob_init_validated(addr, size, &tmp_blob, &cd);
+ 	if (error != 0) {
+ 		printf("unable to create a validated cs_blob object: %d\n", error);
+@@ -4809,6 +4811,7 @@
+ 	tmp_blob.csb_base_offset = base_offset;
+ 
+ 	/* Perform 1st stage reconstitution */
++	pong_cs_stage = 2;
+ 	error = reconstitute_code_signature(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+@@ -4871,6 +4874,7 @@
+ 	 * looking at has been locked down by a code signing monitor if the system
+ 	 * has one.
+ 	 */
++	pong_cs_stage = 3;
+ 	error = validate_main_binary_check(&tmp_blob, csblob_add_flags);
+ 	if (error != 0) {
+ 		printf("failed to verify main binary policy: %d\n", error);
+@@ -4881,6 +4885,7 @@
+ 	unsigned int cs_flags = tmp_blob.csb_flags;
+ 	unsigned int signer_type = tmp_blob.csb_signer_type;
+ 
++	pong_cs_stage = 4;
+ 	error = mac_vnode_check_signature(
+ 		vp,
+ 		&tmp_blob,
+@@ -4932,18 +4937,21 @@
+ #endif
+ 
+ 	/* Perform 2nd stage reconstitution */
++	pong_cs_stage = 5;
+ 	error = reconstitute_code_signature_2nd_stage(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+ 	}
+ 
+ 	/* Setup any multi-level hashing for the code signature */
++	pong_cs_stage = 6;
+ 	error = setup_multilevel_hashing(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+ 	}
+ 
+ 	/* Ensure security critical auxiliary blobs still exist */
++	pong_cs_stage = 7;
+ 	error = validate_auxiliary_signed_blobs(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+@@ -4957,6 +4965,7 @@
+ 	 * that is the last part of signature validation which can shift the code
+ 	 * signature around.
+ 	 */
++	pong_cs_stage = 8;
+ 	error = accelerate_entitlement_queries(&tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+@@ -4989,6 +4998,7 @@
+ 
+ #if defined(XNU_NATIVE_CS_HASH_CACHE) && XNU_NATIVE_CS_HASH_CACHE
+ 	/* Authenticate before publishing the signed object or taking its locks. */
++	pong_cs_stage = 9;
+ 	error = cs_native4k_prepare(vp, &tmp_blob);
+ 	if (error != 0) {
+ 		goto out;
+@@ -5898,7 +5908,9 @@
+ 	int error = EBADEXEC, ioflags;
+ 	kern_return_t kr;
+ 
++	pong_cs_stage = 101;
+ 	if (blob->csb_hash_pageshift <= PAGE_SHIFT) {
++		pong_cs_stage = 102;
+ 		return 0;
+ 	}
+ 	if (PAGE_SHIFT != 12 || blob->csb_hash_pageshift != 14 || cd == NULL || md == NULL ||
+@@ -5906,6 +5918,7 @@
+ 	    md->cs_digest_size > CS_HASH_MAX_SIZE || blob->csb_base_offset < 0 ||
+ 	    (blob->csb_base_offset & PAGE_MASK) || blob->csb_hash_firstlevel_pageshift ||
+ 	    ((ntohl(cd->version) >= CS_SUPPORTSSCATTER) && ntohl(cd->scatterOffset))) {
++		pong_cs_stage = 103;
+ 		return ENOTSUP;
+ 	}
+ 	limit = ntohl(cd->codeLimit);
+@@ -5917,11 +5930,13 @@
+ 	count = (limit + PAGE_MASK) >> PAGE_SHIFT;
+ 	if (os_mul_overflow(count, (vm_size_t)md->cs_size, &allocation) ||
+ 	    round_page_overflow(allocation, &allocation)) {
++		pong_cs_stage = 104;
+ 		return EOVERFLOW;
+ 	}
+ 	kr = kmem_alloc(kernel_map, &storage, allocation,
+ 	    KMA_KOBJECT | KMA_DATA | KMA_ZERO, VM_KERN_MEMORY_SECURITY);
+ 	if (kr != KERN_SUCCESS) {
++		pong_cs_stage = 105;
+ 		printf("Pong native4K: digest allocation failed bytes=%lu kr=%d\n", (unsigned long)allocation, kr);
+ 		return ENOMEM;
+ 	}
+@@ -5948,6 +5963,7 @@
+ 		os_atomic_add(&cs_native4k_read_ticks, hash_start - read_start, relaxed);
+ 		os_atomic_add(&cs_native4k_bytes, (uint64_t)chunk_length, relaxed);
+ 		if (error || resid) {
++			pong_cs_stage = 106;
+ 			error = error ? error : EIO;
+ 			goto out;
+ 		}
+@@ -5962,6 +5978,7 @@
+ 			offset = chunk + block;
+ 			expected = hashes(cd, (uint32_t)(offset >> 14), md->cs_size, lower, upper);
+ 			if (expected == NULL) {
++				pong_cs_stage = 107;
+ 				error = EBADEXEC;
+ 				goto out;
+ 			}
+@@ -5969,6 +5986,7 @@
+ 			md->cs_update(&ctx, data, length);
+ 			md->cs_final(digest, &ctx);
+ 			if (bcmp(expected, digest, md->cs_size)) {
++				pong_cs_stage = 108;
+ 				os_atomic_inc(&cs_validate_page_bad_hash, relaxed);
+ 				error = EBADEXEC;
+ 				goto out;
+@@ -5987,6 +6005,7 @@
+ 	}
+ 	kr = mach_vm_protect(kernel_map, storage, allocation, TRUE, VM_PROT_READ);
+ 	if (kr != KERN_SUCCESS) {
++		pong_cs_stage = 109;
+ 		error = EPERM;
+ 		goto out;
+ 	}
+@@ -5995,6 +6014,7 @@
+ 	blob->csb_native4k_hash_count = count;
+ 	storage = 0;
+ 	os_atomic_inc(&cs_native4k_ready_blobs, relaxed);
++	pong_cs_stage = 110;
+ 	error = 0;
+ out:
+ 	kfree_data(buffer, CS_NATIVE4K_CHUNK);
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1908,18 +1908,19 @@
+ 	extern volatile uint32_t native_owner_cache_shared_cache_mode;
+ 	extern volatile int native_owner_cache_root_recheck;
+ 	extern volatile int pong_cs_fcntl_error;
++	extern volatile int pong_cs_stage;
+ 	extern char native_owner_cache_device_path[64];
+ 	extern volatile int native_owner_data_status;
+ 	extern volatile int native_owner_data_stage;
+ 	extern volatile int native_owner_data_readonly;
+ 	extern volatile dev_t native_owner_data_device;
+ 	extern char native_owner_data_device_path[64];
+-	printf("PONG APFS STATE: stage=%d status=%d mount_status=%d auth=%d recheck=%d cs_err=%d ro=%d "
++	printf("PONG APFS STATE: stage=%d status=%d mount_status=%d auth=%d recheck=%d cs_err=%d cs_stage=%d ro=%d "
+ 	    "root=%x selected=%x mounted=%x path=%s "
+ 	    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s\n",
+ 	    native_owner_cache_stage, native_owner_cache_status,
+ 	    native_owner_cache_mount_status, native_owner_cache_authorized,
+-	    native_owner_cache_root_recheck, pong_cs_fcntl_error,
++	    native_owner_cache_root_recheck, pong_cs_fcntl_error, pong_cs_stage,
+ 	    native_owner_cache_readonly,
+ 	    (unsigned)native_owner_cache_bound_root_device,
+ 	    (unsigned)native_owner_cache_selected_device,
+@@ -1950,13 +1951,13 @@
+ 		} else {
+ #if defined(PONG)
+ 			snprintf(prefix_str_buf, sizeof(prefix_str_buf),
+-			    "initproc failed to start [apfs stage=%d status=%d mount=%d auth=%d recheck=%d cs_err=%d ro=%d "
++			    "initproc failed to start [apfs stage=%d status=%d mount=%d auth=%d recheck=%d cs_err=%d cs_stage=%d ro=%d "
+ 			    "root=%x selected=%x mounted=%x path=%s "
+ 			    "cache_err=%d cache_size=%llu cache_mode=%o "
+ 			    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s]",
+ 			    native_owner_cache_stage, native_owner_cache_status,
+ 			    native_owner_cache_mount_status, native_owner_cache_authorized,
+-			    native_owner_cache_root_recheck, pong_cs_fcntl_error,
++			    native_owner_cache_root_recheck, pong_cs_fcntl_error, pong_cs_stage,
+ 			    native_owner_cache_readonly,
+ 			    (unsigned)native_owner_cache_bound_root_device,
+ 			    (unsigned)native_owner_cache_selected_device,

@@ -1,0 +1,24 @@
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -112,6 +112,8 @@
+ 
+ extern int serial_getc(void);
+ extern void serial_putc_options(char, bool);
++extern void pong_log_putc(char c) __attribute__((weak_import));
++int pong_console_muted;
+ 
+ #if DEBUG || DEVELOPMENT
+ TUNABLE(bool, allow_printf_from_interrupts_disabled_context, "nointr_consio", false);
+@@ -261,6 +263,11 @@
+ 	}
+ 
+-	cons_ops[idx].putc(c, poll);
++	if (!pong_console_muted) {
++		cons_ops[idx].putc(c, poll);
++	}
++	if (pong_log_putc) {
++		pong_log_putc(c);
++	}
+ }
+ 
+ /**

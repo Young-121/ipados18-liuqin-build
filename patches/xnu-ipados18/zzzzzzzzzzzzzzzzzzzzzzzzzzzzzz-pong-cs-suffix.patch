@@ -1,0 +1,40 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -5999,15 +5999,29 @@
+ 				 * tail zeroed, but accept it only when the result
+ 				 * still matches the CodeDirectory's expected hash.
+ 				 */
+-				if (length == PAGE_SIZE * 4 && offset + length == limit) {
++				if (length == PAGE_SIZE * 4) {
+ 					uint8_t retry[CS_HASH_MAX_SIZE];
+-					bzero((void *)(data + PAGE_SIZE), PAGE_SIZE * 3);
+-					md->cs_init(&ctx);
+-					md->cs_update(&ctx, data, length);
+-					md->cs_final(retry, &ctx);
+-					if (bcmp(expected, retry, md->cs_size) == 0) {
+-						pong_cs_stage = 111;
+-						goto native4k_block_ok;
++					uint8_t *copy = kalloc_data(PAGE_SIZE * 4, Z_WAITOK);
++					if (copy != NULL) {
++						for (uint32_t mask = 1; mask < 16; mask++) {
++							memcpy(copy, data, length);
++							for (unsigned page = 0; page < 4; page++) {
++								if (mask & (1U << page)) {
++									bzero(copy + page * PAGE_SIZE,
++									    PAGE_SIZE);
++								}
++							}
++							md->cs_init(&ctx);
++							md->cs_update(&ctx, copy, length);
++							md->cs_final(retry, &ctx);
++							if (bcmp(expected, retry, md->cs_size) == 0) {
++								memcpy((void *)data, copy, length);
++								kfree_data(copy, PAGE_SIZE * 4);
++								pong_cs_stage = 111;
++								goto native4k_block_ok;
++							}
++						}
++						kfree_data(copy, PAGE_SIZE * 4);
+ 					}
+ 				}
+ 				pong_cs_stage = 108;

@@ -1,0 +1,31 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7815,12 +7815,28 @@
+ 	}
+ #endif
+ #if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++	extern volatile int pong_ufs_data_stage;
++	extern volatile int pong_ufs_volume_reason;
++	extern volatile int pong_ufs_data_publish_stage;
++	uint32_t pong_data_probe = 0;
++	(void)PE_parse_boot_argn("pong_data_probe", &pong_data_probe, sizeof(pong_data_probe));
+ 	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
+ 	if (data_error) printf("PONG DEVELOPMENT: scratch Data mount SKIP error=%d stage=%d\n",
+ 	    data_error, native_owner_data_stage);
+ 	else printf("PONG APFS: Data mount PASS path=/private/var device=%s rw=%d bytes=%llu\n",
+ 	    native_owner_data_device_path, !native_owner_data_readonly,
+ 	    (unsigned long long)native_owner_data_seed_size);
++	if (pong_data_probe) {
++		if (data_error)
++			panic("PONG DATA FAIL err=%d stage=%d ro=%d dev=%x pub=%d ufs=%d/%d",
++			    data_error, native_owner_data_stage, native_owner_data_readonly,
++			    (unsigned)native_owner_data_device, pong_ufs_data_publish_stage,
++			    pong_ufs_data_stage, pong_ufs_volume_reason);
++		panic("PONG DATA OK stage=%d ro=%d dev=%x pub=%d ufs=%d/%d",
++		    native_owner_data_stage, native_owner_data_readonly,
++		    (unsigned)native_owner_data_device, pong_ufs_data_publish_stage,
++		    pong_ufs_data_stage, pong_ufs_volume_reason);
++	}
+ #endif
+ 	}
+ #if CONFIG_MEMORYSTATUS

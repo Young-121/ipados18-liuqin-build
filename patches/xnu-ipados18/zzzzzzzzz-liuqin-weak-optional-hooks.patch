@@ -1,0 +1,38 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 5372d98..1152457 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -143,6 +143,33 @@
+ #if defined(PONG)
+ extern void pong_ramoops_diagnostic_write(const char *, int);
+ 
++/* liuqin: weak defaults for two hooks of optional Pong components, so a
++ * kernel built with XNU_PONG_RAMOOPS_CONSOLE=0 and without the PongPower
++ * aggregate links. A strong definition, when that component is built,
++ * replaces each one:
++ * - pong_ramoops_diagnostic_write: arm64/pong_ramoops_console.h (arm_init.o).
++ *   Without the ramoops console there is no reserved buffer to append to.
++ * - pong_smmu_lease_lock/unlock: PongPower PongPlatformResources.cpp, the
++ *   lock Power/USB/WLAN share for the Apps SMMU. NativeUfs imports them weakly
++ *   for its storage-only profile, where it is the single SMMU owner; a static
++ *   kernel link still needs a definition, and this one grants the lease.
++ */
++__attribute__((weak)) void
++pong_ramoops_diagnostic_write(const char *text __unused, int length __unused)
++{
++}
++
++__attribute__((weak)) bool
++pong_smmu_lease_lock(void)
++{
++	return true;
++}
++
++__attribute__((weak)) void
++pong_smmu_lease_unlock(void)
++{
++}
++
+ /* A write-only, small diagnostic endpoint for the Settings adapter. No
+  * process can read kernel memory or choose a physical address through it.
+  * Resolve its MIB once in userspace before installing fatal signal handlers.

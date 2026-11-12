@@ -1,0 +1,13 @@
+diff --git a/osfmk/kern/thread_test_context.h b/osfmk/kern/thread_test_context.h
+index 900d7d0..3fcc15e 100644
+--- a/osfmk/kern/thread_test_context.h
++++ b/osfmk/kern/thread_test_context.h
+@@ -116,7 +116,7 @@ thread_get_test_context(void)
+ 	        thread_test_context_t *_get_ctx = thread_get_test_context(); \
+ 	        __improbable(_get_ctx != NULL)                          \
+ 	            ? (_get_ctx->field)                                 \
+-	            : (__typeof__(_get_ctx->field)){};                  \
++	            : (__typeof__(_get_ctx->field)){0};                 \
+ 	})
+ 
+ /*

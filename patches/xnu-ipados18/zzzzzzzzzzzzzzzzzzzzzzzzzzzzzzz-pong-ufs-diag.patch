@@ -1,0 +1,45 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1909,6 +1909,8 @@
+ 	extern volatile int native_owner_cache_root_recheck;
+ 	extern volatile int pong_cs_fcntl_error;
+ 	extern volatile int pong_cs_stage;
++	extern volatile int pong_ufs_data_stage;
++	extern volatile int pong_ufs_volume_reason;
+ 	extern volatile uint32_t pong_cs_bad_block;
+ 	extern volatile uint32_t pong_cs_expected0;
+ 	extern volatile uint32_t pong_cs_actual0;
+@@ -1921,7 +1923,7 @@
+ 	extern char native_owner_data_device_path[64];
+ 	printf("PONG APFS STATE: stage=%d status=%d mount_status=%d auth=%d recheck=%d cs_err=%d cs_stage=%d cs_blk=%u cs_exp=%08x cs_act=%08x cs_data=%02x%02x%02x%02x%02x%02x%02x%02x ro=%d "
+ 	    "root=%x selected=%x mounted=%x path=%s "
+-	    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s\n",
++	    "data_status=%d data_stage=%d ufs=%d/%d data_ro=%d data_dev=%x data_path=%s\n",
+ 	    native_owner_cache_stage, native_owner_cache_status,
+ 	    native_owner_cache_mount_status, native_owner_cache_authorized,
+ 	    native_owner_cache_root_recheck, pong_cs_fcntl_error, pong_cs_stage,
+@@ -1935,6 +1937,7 @@
+ 	    (unsigned)native_owner_cache_mounted_device,
+ 	    native_owner_cache_device_path,
+ 	    native_owner_data_status, native_owner_data_stage,
++	    pong_ufs_data_stage, pong_ufs_volume_reason,
+ 	    native_owner_data_readonly, (unsigned)native_owner_data_device,
+ 	    native_owner_data_device_path);
+ #endif
+@@ -1962,7 +1965,7 @@
+ 			    "initproc failed to start [apfs stage=%d status=%d mount=%d auth=%d recheck=%d cs_err=%d cs_stage=%d cs_blk=%u cs_exp=%08x cs_act=%08x cs_data=%02x%02x%02x%02x%02x%02x%02x%02x ro=%d "
+ 			    "root=%x selected=%x mounted=%x path=%s "
+ 			    "cache_err=%d cache_size=%llu cache_mode=%o "
+-			    "data_status=%d data_stage=%d data_ro=%d data_dev=%x data_path=%s]",
++			    "data_status=%d data_stage=%d ufs=%d/%d data_ro=%d data_dev=%x data_path=%s]",
+ 			    native_owner_cache_stage, native_owner_cache_status,
+ 			    native_owner_cache_mount_status, native_owner_cache_authorized,
+ 			    native_owner_cache_root_recheck, pong_cs_fcntl_error, pong_cs_stage,
+@@ -1979,6 +1982,7 @@
+ 			    (unsigned long long)native_owner_cache_shared_cache_size,
+ 			    native_owner_cache_shared_cache_mode,
+ 			    native_owner_data_status, native_owner_data_stage,
++			    pong_ufs_data_stage, pong_ufs_volume_reason,
+ 			    native_owner_data_readonly, (unsigned)native_owner_data_device,
+ 			    native_owner_data_device_path);
+ 			prefix_str = prefix_str_buf;

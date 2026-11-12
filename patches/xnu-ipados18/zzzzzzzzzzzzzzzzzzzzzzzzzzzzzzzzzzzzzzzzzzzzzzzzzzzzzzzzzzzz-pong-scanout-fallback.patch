@@ -1,0 +1,28 @@
+--- a/iokit/Kernel/MiniIOMobileFramebuffer.cpp
++++ b/iokit/Kernel/MiniIOMobileFramebuffer.cpp
+@@ -60,6 +60,7 @@
+ }
+ 
+ extern "C" bool pong_scanout_quarantined(void);
++extern "C" bool pong_scanout_fallback(void);
+ extern "C" void pong_scanout_idle(void);
+ #endif
+ #if XNU_PONG_BACKLIGHT
+@@ -113,7 +114,7 @@
+ 
+ #define FRAME_TIMES             64                      /* milliseconds told apart between two frames */
+ #define FRAME_PAUSE             90                      /* from so many on, nothing was moving: not a slow frame */
+-#define SWAP_GPU_MS             500                     /* keep the previous picture when this frame is unfinished */
++#define SWAP_GPU_MS             1000                    /* keep the previous picture when this frame is unfinished */
+ #define SWAP_HELD_MS            700                     /* a swap that cannot be taken by then is not shown at all */
+ 
+ #define FOURCC(a, b, c, d) ((uint32_t)(a) << 24 | (uint32_t)(b) << 16 | (uint32_t)(c) << 8 | (uint32_t)(d))
+@@ -1156,7 +1157,7 @@
+ 	 * CPU write. Result 2 poisons the handoff; result 0 permits CPU fallback. */
+ 	if(pong_scanout_quarantined()){IOLockUnlock(fLock);return kIOReturnNotReady;}
+ #endif
+-	if(fGpuOnly && !gpuFrame) {
++	if(fGpuOnly && !gpuFrame && !pong_scanout_fallback()) {
+ 		static unsigned missed=0;
+ 		if(missed++<4)IOLog("PONG GPU ONLY: no completed GPU frame; CPU composition disabled\n");
+ 		IOLockUnlock(fLock);return kIOReturnNotReady;

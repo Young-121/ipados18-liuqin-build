@@ -1,0 +1,216 @@
+/dts-v1/;
+/include/ "sm8475.dtsi"
+/*
+ * Xiaomi Pad 6 Pro (liuqin), SM8475. Hardware description for the XNU ADT.
+ * memory and reserved-memory are generated from configs/liuqin-memory-sm8475.json
+ * (scripts/gen-liuqin-memory.py); the UFS and PCIe0 nodes are the SM8475 resources and the
+ * QCA6490 WLAN lines (gpio80 enable, gpio204 xo-clk, pcie0 perst/clkreq/wake 94/95/96) that
+ * liuqin shares with pong (reference/mainline/sm8475-xiaomi-liuqin.dts:387-400).
+ */
+/ {
+    model = "Xiaomi Pad 6 Pro";
+    compatible = "xiaomi,liuqin", "qcom,sm8475";
+    #address-cells = <2>;
+    #size-cells = <2>;
+    /* 8 GB unit, stock ABL /memory. Single contiguous DRAM range for the XNU ADT
+     * (devicetree.generate() requires exactly one memory register). Bank 4 is the
+     * largest contiguous span (5 GiB); the other banks are reserved below so XNU
+     * never tries to allocate from them. */
+    memory@840000000 { device_type = "memory"; reg = <0x8 0x40000000 0x1 0x40000000>; };
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+        region0@80000000 { reg = <0x0 0x80000000 0x0 0x600000>; no-map; }; /* mainline:memory@80000000 */
+        region1@80600000 { reg = <0x0 0x80600000 0x0 0x40000>; no-map; }; /* mainline:memory@80600000 */
+        region2@80640000 { reg = <0x0 0x80640000 0x0 0x1c0000>; no-map; }; /* pong:xbl_ramdump_region@80640000 */
+        region3@80800000 { reg = <0x0 0x80800000 0x0 0x60000>; no-map; }; /* mainline:memory@80800000 */
+        region4@80800000 { reg = <0x0 0x80800000 0x0 0xa0000>; no-map; }; /* uefiplat:AOP */
+        region5@80860000 { reg = <0x0 0x80860000 0x0 0x20000>; no-map; }; /* mainline:memory@80860000 */
+        region6@80880000 { reg = <0x0 0x80880000 0x0 0x20000>; no-map; }; /* mainline:memory@80880000 */
+        region7@808a0000 { reg = <0x0 0x808a0000 0x0 0x40000>; no-map; }; /* mainline:memory@808a0000 */
+        region8@808e0000 { reg = <0x0 0x808e0000 0x0 0x4000>; no-map; }; /* mainline:memory@808e0000 */
+        region9@808e4000 { reg = <0x0 0x808e4000 0x0 0x10000>; no-map; }; /* mainline:memory@808e4000 */
+        region10@80900000 { reg = <0x0 0x80900000 0x0 0x200000>; no-map; }; /* mainline:memory@80900000 */
+        region11@80b00000 { reg = <0x0 0x80b00000 0x0 0x100000>; no-map; }; /* mainline:memory@80b00000 */
+        region12@80c00000 { reg = <0x0 0x80c00000 0x0 0x4600000>; no-map; }; /* mainline:memory@80c00000 */
+        region13@85200000 { reg = <0x0 0x85200000 0x0 0x400000>; no-map; }; /* pong:ramoops_region */
+        region14@85200000 { reg = <0x0 0x85200000 0x0 0x1dc00000>; no-map; }; /* uefiplat:PIL Reserved */
+        region15@85700000 { reg = <0x0 0x85700000 0x0 0x700000>; no-map; }; /* mainline:memory@85700000 */
+        region16@85700000 { reg = <0x0 0x85700000 0x0 0x2800000>; no-map; }; /* pong:adsp_region@85700000 */
+        region17@88000000 { reg = <0x0 0x88000000 0x0 0x1900000>; no-map; }; /* mainline:memory@88000000 */
+        region18@89900000 { reg = <0x0 0x89900000 0x0 0x2000000>; no-map; }; /* mainline:memory@89900000 */
+        region19@8b900000 { reg = <0x0 0x8b900000 0x0 0x10000>; no-map; }; /* mainline:memory@8b900000 */
+        region20@8b910000 { reg = <0x0 0x8b910000 0x0 0xa000>; no-map; }; /* mainline:memory@8b910000 */
+        region21@8b91a000 { reg = <0x0 0x8b91a000 0x0 0x2000>; no-map; }; /* mainline:memory@8b91a000 */
+        region22@8ba00000 { reg = <0x0 0x8ba00000 0x0 0x180000>; no-map; }; /* mainline:memory@8ba00000 */
+        region23@8bb80000 { reg = <0x0 0x8bb80000 0x0 0x60000>; no-map; }; /* mainline:memory@8bb80000 */
+        region24@8bbe0000 { reg = <0x0 0x8bbe0000 0x0 0x20000>; no-map; }; /* mainline:memory@8bbe0000 */
+        region25@8bc00000 { reg = <0x0 0x8bc00000 0x0 0x13200000>; no-map; }; /* mainline:memory@8bc00000 */
+        region26@9ee00000 { reg = <0x0 0x9ee00000 0x0 0x700000>; no-map; }; /* mainline:memory@9ee00000 */
+        region27@9f500000 { reg = <0x0 0x9f500000 0x0 0x800000>; no-map; }; /* mainline:memory@9f500000 */
+        region28@9fd00000 { reg = <0x0 0x9fd00000 0x0 0x700000>; no-map; }; /* pong:video_region@9FD00000 */
+        region29@9fd00000 { reg = <0x0 0x9fd00000 0x0 0x3100000>; no-map; }; /* mainline:memory@9fd00000 */
+        region30@a1400000 { reg = <0x0 0xa1400000 0x0 0x2b00000>; no-map; }; /* uefiplat:Display Demura */
+        region31@a6b80000 { reg = <0x0 0xa6b80000 0x0 0x280000>; no-map; }; /* mainline:memory@a6b80000 */
+        region32@a6e00000 { reg = <0x0 0xa6e00000 0x0 0x40000>; no-map; }; /* mainline:memory@a6e00000 */
+        region33@a6f00000 { reg = <0x0 0xa6f00000 0x0 0x100000>; no-map; }; /* mainline:memory@a6f00000 */
+        region34@a7000000 { reg = <0x0 0xa7000000 0x0 0x400000>; no-map; }; /* mainline:ramoops@a7000000 */
+        region35@a7400000 { reg = <0x0 0xa7400000 0x0 0x200000>; no-map; }; /* uefiplat:UEFI FD Reserved */
+        region36@a7601000 { reg = <0x0 0xa7601000 0x0 0x1000>; no-map; }; /* uefiplat:Info Blk */
+        region37@a7605000 { reg = <0x0 0xa7605000 0x0 0x8000>; no-map; }; /* uefiplat:Log Buffer */
+        region38@b8000000 { reg = <0x0 0xb8000000 0x0 0x2b00000>; no-map; }; /* mainline:splash_region@b8000000 */
+        region39@bb000000 { reg = <0x0 0xbb000000 0x0 0x5000000>; no-map; }; /* mainline:memory@bb000000 */
+        region40@c0000000 { reg = <0x0 0xc0000000 0x0 0x20000000>; no-map; }; /* mainline:memory@c0000000 */
+        region41@e0000000 { reg = <0x0 0xe0000000 0x0 0x600000>; no-map; }; /* mainline:memory@e0000000 */
+        region42@e0000000 { reg = <0x0 0xe0000000 0x0 0x5700000>; no-map; }; /* uefiplat:VM PIL */
+        region43@e0600000 { reg = <0x0 0xe0600000 0x0 0x400000>; no-map; }; /* mainline:memory@e0600000 */
+        region44@e0a00000 { reg = <0x0 0xe0a00000 0x0 0x100000>; no-map; }; /* mainline:memory@e0a00000 */
+        region45@e0b00000 { reg = <0x0 0xe0b00000 0x0 0x4af3000>; no-map; }; /* mainline:memory@e0b00000 */
+        region46@e55f3000 { reg = <0x0 0xe55f3000 0x0 0x9000>; no-map; }; /* mainline:memory@e55f3000 */
+        region47@e55fc000 { reg = <0x0 0xe55fc000 0x0 0x4000>; no-map; }; /* mainline:memory@e55fc000 */
+        region48@e5600000 { reg = <0x0 0xe5600000 0x0 0x100000>; no-map; }; /* mainline:memory@e5600000 */
+        region49@e8800000 { reg = <0x0 0xe8800000 0x0 0x100000>; no-map; }; /* mainline:memory@e8800000 */
+        region50@e8800000 { reg = <0x0 0xe8800000 0x0 0x1000000>; no-map; }; /* uefiplat:TZ STATS */
+        region51@e8900000 { reg = <0x0 0xe8900000 0x0 0x1200000>; no-map; }; /* mainline:memory@e8900000 */
+        region52@e9b00000 { reg = <0x0 0xe9b00000 0x0 0x500000>; no-map; }; /* mainline:memory@e9b00000 */
+        region53@ea000000 { reg = <0x0 0xea000000 0x0 0x3900000>; no-map; }; /* mainline:memory@ea000000 */
+        region54@ea000000 { reg = <0x0 0xea000000 0x0 0x7400000>; no-map; }; /* uefiplat:TZApps Reserved */
+        region55@ed900000 { reg = <0x0 0xed900000 0x0 0x3b00000>; no-map; }; /* mainline:memory@ed900000 */
+        region56@f8700000 { reg = <0x0 0xf8700000 0x0 0x280000>; no-map; }; /* mainline:memory@f8700000 */
+        region57@830000000 { reg = <0x8 0x30000000 0x0 0x10000000>; no-map; }; /* uefiplat:HYP Reserved */
+        /* liuqin DRAM banks outside the single contiguous memory range, reserved so
+         * XNU never allocates from them (see devicetree.generate(): one DRAM range). */
+        region58@80000000 { reg = <0x0 0x80000000 0x0 0x6a000000>; no-map; }; /* dram bank 0 */
+        region59@f1400000 { reg = <0x0 0xf1400000 0x0 0xec00000>; no-map; }; /* dram bank 1 */
+        region60@800000000 { reg = <0x8 0x0 0x0 0x39700000>; no-map; }; /* dram bank 2 */
+        region61@839d00000 { reg = <0x8 0x39d00000 0x0 0x1e00000>; no-map; }; /* dram bank 3 */
+    };
+    /*
+     * Novatek NT36532 TDDI on QUP0 SE4 (spi@990000) chip select 0, 9.6 MHz, IRQ gpio21
+     * (reference/mainline/sm8475-xiaomi-liuqin.dts:1376-1415). No reset line of its own:
+     * the panel prepare resets the die, and the touch firmware is downloaded after that.
+     * pins: SPI data/clk gpio16-18, cs gpio19, irq gpio21, reset none (0xff).
+     * No XNU driver yet; the node records the inputs for one.
+     */
+    liuqin-touch {
+        compatible = "liuqin,novatek-nt36532-spi";
+        status = "disabled";
+        spi-base = /bits/ 64 <0x990000>;
+        tlmm-base = /bits/ 64 <0xf000000>;
+        gcc-base = /bits/ 64 <0x100000>;
+        rsc-base = /bits/ 64 <0x17a20000>;
+        cmd-db-base = /bits/ 64 <0x80860000>;
+        gpio-offset = <0x100000>;
+        pins = <16 17 18 19 21 0xff>;
+        spi-max-frequency = <9600000>;
+        swrst-n8-addr = <0x1fb43e>;
+        firmware-name = "novatek/liuqin/novatek_nt36532_m81_fw_csot.bin";
+        max-x = <1800>; max-y = <2880>;
+    };
+    /*
+     * Power: PMK8350 PON KPDPWR; volume down: PON RESIN; volume up: PM8350 GPIO6 (SID 1,
+     * peripheral 0x8D). The same three keys and PPIDs as pong (mainline :220-227, :1329-1336).
+     */
+    pong-buttons {
+        compatible = "pong,pm8350-keys";
+        core-base = /bits/ 64 <0xc400000>;
+        cnfg-base = /bits/ 64 <0xc42d000>;
+        observer-base = /bits/ 64 <0xc440000>;
+        ee = <0>; pon-ppid = <0x13>; volume-up-ppid = <0x18d>;
+    };
+};
+&ufs { status = "okay"; pong,gcc-ufs-page = /bits/ 64 <0x187000>; pong,smmu-stream-id = <0xe0>; pong,ufs-spi = <265>; };
+&pcie0 {
+    status = "okay";
+    wlan-enable-gpios = <&tlmm 80 0>; reset-gpios = <&tlmm 94 1>;
+    clkreq-gpios = <&tlmm 95 1>; wake-gpios = <&tlmm 96 1>; xo-clk-gpios = <&tlmm 204 0>;
+    qcom,ep-latency = <10>; qcom,aux-clk-freq = <20>;
+    qcom,phy-status-offset = <0x214>; qcom,phy-status-bit = <6>;
+    qcom,phy-power-down-offset = <0x240>;
+    max-clock-frequency-hz = <0 0 0 19200000 0 0 0 0 0 0 0 100000000 0 0 0>;
+    qcom,phy-sequence = <
+        0x240 0x3 0
+        0xc0 0x1 0
+        0xcc 0x31 0
+        0xd0 0x1 0
+        0x60 0xff 0
+        0x64 0x6 0
+        0x0 0x4c 0
+        0x4 0x6 0
+        0xe0 0x90 0
+        0xe4 0x82 0
+        0xf4 0x7 0
+        0x70 0x2 0
+        0x10 0x2 0
+        0x74 0x16 0
+        0x14 0x16 0
+        0x78 0x36 0
+        0x18 0x36 0
+        0x110 0x8 0
+        0xbc 0xe 0
+        0x120 0x42 0
+        0x80 0xa 0
+        0x84 0x1a 0
+        0x20 0x14 0
+        0x24 0x34 0
+        0x88 0x82 0
+        0x28 0x68 0
+        0x90 0xab 0
+        0x94 0xea 0
+        0x98 0x2 0
+        0x30 0xab 0
+        0x34 0xaa 0
+        0x38 0x2 0
+        0x140 0x14 0
+        0x164 0x34 0
+        0x3c 0x1 0
+        0x1c 0x4 0
+        0x174 0x16 0
+        0x1bc 0xf 0
+        0x170 0xa0 0
+        0x11a4 0x38 0
+        0x10dc 0x11 0
+        0x1160 0xbf 0
+        0x1164 0xbf 0
+        0x1168 0xb7 0
+        0x116c 0xea 0
+        0x115c 0x3f 0
+        0x1174 0x5c 0
+        0x1178 0x9c 0
+        0x117c 0x1a 0
+        0x1180 0x89 0
+        0x1170 0xdc 0
+        0x1188 0x94 0
+        0x118c 0x5b 0
+        0x1190 0x1a 0
+        0x1194 0x89 0
+        0x10cc 0xf0 0
+        0x1008 0x9 0
+        0x1014 0x5 0
+        0x104c 0x8 0
+        0x1050 0x8 0
+        0x10d8 0xf 0
+        0x1118 0x1c 0
+        0x10f8 0x7 0
+        0x11f8 0x8 0
+        0xe84 0x15 0
+        0xe90 0x3f 0
+        0xee4 0x2 0
+        0xe40 0x6 0
+        0xe3c 0x18 0
+        0x2dc 0x5 0
+        0x388 0x77 0
+        0x398 0xb 0
+        0x3e0 0xf 0
+        0x60c 0x1d 0
+        0x614 0x7 0
+        0x620 0xc1 0
+        0x694 0x0 0
+        0x3d0 0x8c 0
+        0x1424 0x1 0
+        0x1428 0x1 0
+        0x200 0x0 0
+        0x244 0x3 0
+    >;
+};

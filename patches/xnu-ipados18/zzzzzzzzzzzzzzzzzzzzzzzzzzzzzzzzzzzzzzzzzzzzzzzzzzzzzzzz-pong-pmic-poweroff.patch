@@ -1,0 +1,104 @@
+--- a/bsd/dev/pong_touch.c
++++ b/bsd/dev/pong_touch.c
+@@ -5624,6 +5624,8 @@
+ #define SPMI_CH_RDATA0          0x18u
+ #define SPMI_CH_STRIDE          0x20u
+ #define SPMI_OP_READ            15u
++#define SPMI_OP_WRITE           14u
++#define SPMI_CH_WDATA0          0x10u
+ #define SPMI_ST_DONE            (1u << 0)
+ #define SPMI_ST_ERR             0x7eu
+ 
+@@ -5641,6 +5643,7 @@
+ static vm_offset_t pmic_core, pmic_cfg0, pmic_cfg1, pmic_obs;
+ static uint32_t pmic_bus0_apids, pmic_bus1_apids;
+ static int liuqin_keys_chan;
++static uint32_t pong_pon_apid = (uint32_t)-1;
+ 
+ static uint64_t
+ pmic_ns_since(uint64_t t0)
+@@ -5720,6 +5723,76 @@
+ pmic_read(uint32_t apid, uint32_t addr, uint8_t *buf, size_t len)
+ {
+ 	return pmic_read_ex(apid, addr, buf, len, NULL, NULL);
++}
++
++/*
++ * One SPMI register write, the mirror of pmic_read_ex.  The v7 arbiter takes
++ * the data in WDATA0, starts the transaction with opcode 14 (PMIC_ARB_OP_WRITE)
++ * in the command register and reports completion in STATUS.  Only the PMIC
++ * power-off path writes.
++ */
++static int
++pmic_write(uint32_t apid, uint32_t addr, const uint8_t *buf, size_t len)
++{
++	const uint32_t ch = apid * SPMI_CH_STRIDE;
++	const uint32_t cmd = (SPMI_OP_WRITE << 27) |
++	    ((addr & 0xffu) << 4) | (uint32_t)(len - 1);
++	uint32_t data = 0, st = 0;
++	unsigned i;
++
++	if (pmic_obs == 0 || len == 0 || len > 4) {
++		return -1;
++	}
++	for (i = 0; i < len; i++) {
++		data |= (uint32_t)buf[i] << (8 * i);
++	}
++	tch_wr(pmic_obs, ch + SPMI_CH_WDATA0, data);
++	tch_wr(pmic_obs, ch + SPMI_CH_CMD, cmd);
++	for (i = 0; i < 100000; i++) {
++		st = tch_rd(pmic_obs, ch + SPMI_CH_STATUS);
++		if ((st & SPMI_ST_DONE) != 0) {
++			break;
++		}
++		delay(1);
++	}
++	if ((st & SPMI_ST_DONE) == 0 || (st & SPMI_ST_ERR) != 0) {
++		printf("LIUQIN POWER: spmi write apid %u addr 0x%x status 0x%08x\n",
++		    apid, addr, st);
++		return -1;
++	}
++	return 0;
++}
++
++/*
++ * Power off through the PMK8350 PON block (gen3): clear PS_HOLD enable, select
++ * PON_PS_HOLD_TYPE_SHUTDOWN (4) in PON_PS_HOLD_RST_CTL and re-enable it, which
++ * drops PS_HOLD and powers the PMIC down.  Offsets follow the mainline
++ * pm8941-pwrkey driver: PON_PS_HOLD_RST_CTL 0x5a, CTL2 0x5b, enable bit 7,
++ * type bits 3:0.  A zero return means the last write retired, so the caller
++ * spins instead of returning to a system with no power path.
++ */
++int
++liuqin_pmic_poweroff(void)
++{
++	uint8_t v = 0;
++	uint32_t apid = __atomic_load_n(&pong_pon_apid, __ATOMIC_ACQUIRE);
++
++	if (pmic_obs == 0 || apid == (uint32_t)-1) {
++		return -1;
++	}
++	printf("LIUQIN POWER: PMIC power off via PON apid %u\n", apid);
++	if (pmic_read(apid, 0x135b, &v, 1) != 0) return -2;
++	v &= (uint8_t)~0x80;
++	if (pmic_write(apid, 0x135b, &v, 1) != 0) return -3;
++	delay(2);
++	if (pmic_read(apid, 0x135a, &v, 1) != 0) return -4;
++	v = (uint8_t)((v & ~0x0fu) | 4u);
++	if (pmic_write(apid, 0x135a, &v, 1) != 0) return -5;
++	delay(2);
++	if (pmic_read(apid, 0x135b, &v, 1) != 0) return -6;
++	v |= 0x80u;
++	if (pmic_write(apid, 0x135b, &v, 1) != 0) return -7;
++	return 0;
+ }
+ 
+ /*
+@@ -5872,6 +5945,7 @@
+ 		    "power -> %d, volume up -> %d\n", scanned,
+ 		    ns / 1000ull, (int)pon_apid, (int)volup_apid);
+ 	}
++	__atomic_store_n(&pong_pon_apid, pon_apid, __ATOMIC_RELEASE);
+ 	if (pon_apid == (uint32_t)-1 && volup_apid == (uint32_t)-1) {
+ 		printf("LIUQIN KEYS: neither PPID found; stopping (no polling)\n");
+ 		return;

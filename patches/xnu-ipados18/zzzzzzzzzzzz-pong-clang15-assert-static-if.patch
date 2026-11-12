@@ -1,0 +1,26 @@
+diff --git a/osfmk/kern/assert.h b/osfmk/kern/assert.h
+index fcbeeb9..b5dd85b 100644
+--- a/osfmk/kern/assert.h
++++ b/osfmk/kern/assert.h
+@@ -121,7 +121,20 @@ struct mach_assert_3x {
+ #if MACH_ASSERT
+ # if XNU_KERNEL_PRIVATE
+ STATIC_IF_KEY_DECLARE_TRUE(mach_assert);
+-#   define mach_assert_enabled()    improbable_static_if(mach_assert)
++#   if defined(__clang__) && __clang_major__ < 16
++/*
++ * clang 15 cannot lower asm goto labels emitted from a statement expression
++ * inside functions with VLAs: it treats the labels of separate assert()
++ * expansions as shared and reports a jump that bypasses initialization.
++ * static_if_key_delta() keeps sik_enable_count in sync with the patched
++ * branch, so reading it is equivalent to improbable_static_if(mach_assert)
++ * and has no asm goto.
++ */
++#     define mach_assert_enabled() \
++	(mach_assert_jump_key.key.sik_enable_count >= 0)
++#   else
++#     define mach_assert_enabled()  improbable_static_if(mach_assert)
++#   endif
+ # else
+ #   define mach_assert_enabled()    1
+ # endif /* !XNU_KERNEL_PRIVATE */

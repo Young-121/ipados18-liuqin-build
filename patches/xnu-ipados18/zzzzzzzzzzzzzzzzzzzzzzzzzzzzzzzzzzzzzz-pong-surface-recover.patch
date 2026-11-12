@@ -1,0 +1,25 @@
+diff --git a/iokit/Kernel/MiniIOSurface.cpp b/iokit/Kernel/MiniIOSurface.cpp
+--- a/iokit/Kernel/MiniIOSurface.cpp
++++ b/iokit/Kernel/MiniIOSurface.cpp
+@@ -1912,7 +1912,20 @@
+     IOLockLock(gSurfaceLock);
+     if(args->scalarInput[1]==0) {
+         if(surface->displayReaders)result=kIOReturnBusy;
+-        if(!result && surface->gpuFailed)result=kIOReturnNotReady;
++        if(!result && surface->gpuFailed) {
++            /* A transient GPU completion failure poisons the surface forever
++             * today: every later begin answers NotReady and the compositor can
++             * no longer draw into its own frame. Once the failed transaction
++             * has no writer and the display is not reading it, let the next
++             * frame acquire it again; that frame overwrites the invalid
++             * contents. pong_surface_recover=0 keeps the old behavior. */
++            static int recover=-1;
++            if(recover<0){int v=1;PE_parse_boot_argn("pong_surface_recover",&v,sizeof v);recover=v!=0;}
++            if(recover && !surface->gpuWriters && !surface->displayReaders) {
++                surface->gpuFailed=false;
++                surface->drawn=0;
++            } else result=kIOReturnNotReady;
++        }
+         if(!result) {
+             unsigned slot=256,empty=256;
+             for(unsigned i=0;i<256;i++) {

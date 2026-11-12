@@ -1,0 +1,31 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2002,6 +2002,28 @@
+ 	proc_crash_coredump(p);
+ 
+ 	sync(p, (void *)NULL, (int *)NULL);
++#if defined(PONG)
++	/*
++	 * On this port launchd completes iOS shutdown by exiting instead of
++	 * issuing reboot(2), which XNU turns into an initproc panic and the
++	 * device never powers off. Treat that exit as the shutdown request it
++	 * is: run the platform halt path (PSCI SYSTEM_OFF on this board) and
++	 * keep the panic only when pong_init_poweroff=0 asks for it.
++	 */
++	if (p == initproc) {
++		extern int PE_parse_boot_argn(const char *, void *, int);
++		extern int PEHaltRestart(unsigned int);
++		int poweroff = 1;
++		(void)PE_parse_boot_argn("pong_init_poweroff", &poweroff, sizeof(poweroff));
++		if (poweroff) {
++			printf("PONG: initproc exited (%s); platform power off\n", prefix_str);
++			PEHaltRestart(0 /* kPEHaltCPU */);
++			for (;;) {
++				__asm__ volatile("wfi");
++			}
++		}
++	}
++#endif
+ 	const uint64_t panic_options_mask = DEBUGGER_OPTION_INITPROC_PANIC | DEBUGGER_OPTION_USERSPACE_INITIATED_PANIC;
+ 
+ 	if (p->p_exit_reason == OS_REASON_NULL) {

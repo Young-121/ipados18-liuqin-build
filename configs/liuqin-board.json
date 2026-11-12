@@ -1,0 +1,65 @@
+{
+  "board": "liuqin",
+  "physical_model": "Xiaomi Pad 6 Pro",
+  "memory": "configs/liuqin-memory-sm8475.json",
+  "display": {
+    "panel": "CSOT m81_42_02_0b NT36532 TDDI, dual DSI, DSC, video mode (stock Panel_M81_42_02_0b_dualdsi_dsc_lcd_video.xml)",
+    "width": 1800,
+    "height": 2880,
+    "stride": 7200,
+    "framebuffer": "0xb8000000",
+    "scale": 2,
+    "backlight": "KTZ8866 on QUP0 i2c1 address 0x11, enable gpio6; left on by the ABL, no XNU driver yet",
+    "backlight_i2c": {
+      "controller": "0x984000",
+      "span": 16384,
+      "enable_gpio": 6,
+      "address": 17,
+      "maximum": 2047,
+      "version": 1
+    }
+  },
+  "identity": {
+    "comment": "The iPad7,11 / J171AP identity of the restore itself; liuqin is a tablet, so no phone presentation layer.",
+    "model": "iPad7,11",
+    "compatible": [
+      "J171AP",
+      "iPad7,11",
+      "qcom,sm8475"
+    ],
+    "target_type": "J171",
+    "target_sub_type": "J171AP",
+    "product_name": "iPad",
+    "product_description": "iPad",
+    "artwork_device_idiom": "pad",
+    "artwork_device_subtype": 2160,
+    "artwork_scale_factor": 2,
+    "device_perf_memory_class": 3,
+    "thin_bezel": 1,
+    "compatible_device_fallback": "iPad7,11"
+  },
+  "touch": {
+    "node": "liuqin-touch",
+    "compatible": "liuqin,novatek-nt36532-spi",
+    "spi_base": "0x990000",
+    "pins": [
+      16,
+      17,
+      18,
+      19,
+      21,
+      255
+    ],
+    "max_x": 1800,
+    "max_y": 2880,
+    "comment": "QUP0 SE4 CS0, 9.6 MHz, IRQ gpio21, no reset line; no XNU driver yet, so no driver matches this node"
+  },
+  "boot": {
+    "comment": "One fastboot boot, RAM only: the stock ABL starts the kernel slot (gzip BootShim + UEFI FD, then the stock Cape SoC DTB it selects by msm-id) and hands the ramdisk (vendor ramdisk of vendor_boot, 21.7 MiB, then the PONGFAT1 payload) to the firmware through /chosen linux,initrd-*; PongBootMemoryDxe scans that range, at most 128 MiB.",
+    "label": "Xiaomi Pad 6 Pro / liuqin / SM8475",
+    "image": "liuqin-xnu-initial.img",
+    "kernel_slot": "firmware",
+    "dram_size": "0x200000000",
+    "window_size": "0x100000000"
+  }
+}

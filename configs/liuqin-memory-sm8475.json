@@ -1,0 +1,576 @@
+{
+  "format": "pong-sm8475-dram-v1",
+  "board": "liuqin",
+  "physical_bytes": 8389656576,
+  "source": "DRAM: stock ABL /memory of the 8 GB unit (iPadOS-liuqin NOTES 6.2); reserved: union of mainline liuqin fe81794b, stock uefiplat.cfg V14.0.9.0.TMYCNXM and the pong SM8475 capture",
+  "dram": [
+    {
+      "base": "0x80000000",
+      "size": "0x6a000000"
+    },
+    {
+      "base": "0xf1400000",
+      "size": "0xec00000"
+    },
+    {
+      "base": "0x800000000",
+      "size": "0x39700000"
+    },
+    {
+      "base": "0x839d00000",
+      "size": "0x1e00000"
+    },
+    {
+      "base": "0x840000000",
+      "size": "0x140000000"
+    }
+  ],
+  "reserved": [
+    {
+      "name": "mainline:memory@80000000",
+      "base": "0x80000000",
+      "size": "0x600000"
+    },
+    {
+      "name": "uefiplat:HYP",
+      "base": "0x80000000",
+      "size": "0x600000"
+    },
+    {
+      "name": "pong:hyp_region@80000000",
+      "base": "0x80000000",
+      "size": "0x600000"
+    },
+    {
+      "name": "mainline:memory@80600000",
+      "base": "0x80600000",
+      "size": "0x40000"
+    },
+    {
+      "name": "uefiplat:DT BLOB",
+      "base": "0x80600000",
+      "size": "0x40000"
+    },
+    {
+      "name": "pong:xbl_dtlog_region@80600000",
+      "base": "0x80600000",
+      "size": "0x40000"
+    },
+    {
+      "name": "pong:xbl_ramdump_region@80640000",
+      "base": "0x80640000",
+      "size": "0x1c0000"
+    },
+    {
+      "name": "mainline:memory@80800000",
+      "base": "0x80800000",
+      "size": "0x60000"
+    },
+    {
+      "name": "pong:aop_image_region@80800000",
+      "base": "0x80800000",
+      "size": "0x60000"
+    },
+    {
+      "name": "uefiplat:AOP",
+      "base": "0x80800000",
+      "size": "0xa0000"
+    },
+    {
+      "name": "mainline:memory@80860000",
+      "base": "0x80860000",
+      "size": "0x20000"
+    },
+    {
+      "name": "pong:aop_cmd_db_region@80860000",
+      "base": "0x80860000",
+      "size": "0x20000"
+    },
+    {
+      "name": "mainline:memory@80880000",
+      "base": "0x80880000",
+      "size": "0x20000"
+    },
+    {
+      "name": "pong:aop_config_region@80880000",
+      "base": "0x80880000",
+      "size": "0x20000"
+    },
+    {
+      "name": "mainline:memory@808a0000",
+      "base": "0x808a0000",
+      "size": "0x40000"
+    },
+    {
+      "name": "pong:tme_crash_dump_region@808a0000",
+      "base": "0x808a0000",
+      "size": "0x40000"
+    },
+    {
+      "name": "mainline:memory@808e0000",
+      "base": "0x808e0000",
+      "size": "0x4000"
+    },
+    {
+      "name": "pong:tme_log_region@808e0000",
+      "base": "0x808e0000",
+      "size": "0x4000"
+    },
+    {
+      "name": "mainline:memory@808e4000",
+      "base": "0x808e4000",
+      "size": "0x10000"
+    },
+    {
+      "name": "pong:uefi_log_region@808e4000",
+      "base": "0x808e4000",
+      "size": "0x10000"
+    },
+    {
+      "name": "mainline:memory@80900000",
+      "base": "0x80900000",
+      "size": "0x200000"
+    },
+    {
+      "name": "uefiplat:SMEM",
+      "base": "0x80900000",
+      "size": "0x200000"
+    },
+    {
+      "name": "pong:smem_region@80900000",
+      "base": "0x80900000",
+      "size": "0x200000"
+    },
+    {
+      "name": "mainline:memory@80b00000",
+      "base": "0x80b00000",
+      "size": "0x100000"
+    },
+    {
+      "name": "uefiplat:CUCP",
+      "base": "0x80b00000",
+      "size": "0x100000"
+    },
+    {
+      "name": "pong:cpucp_fw_region@80b00000",
+      "base": "0x80b00000",
+      "size": "0x100000"
+    },
+    {
+      "name": "mainline:memory@80c00000",
+      "base": "0x80c00000",
+      "size": "0x4600000"
+    },
+    {
+      "name": "pong:cdsp_secure_heap_region@80c00000",
+      "base": "0x80c00000",
+      "size": "0x4600000"
+    },
+    {
+      "name": "pong:ramoops_region",
+      "base": "0x85200000",
+      "size": "0x400000"
+    },
+    {
+      "name": "uefiplat:PIL Reserved",
+      "base": "0x85200000",
+      "size": "0x1dc00000"
+    },
+    {
+      "name": "mainline:memory@85700000",
+      "base": "0x85700000",
+      "size": "0x700000"
+    },
+    {
+      "name": "pong:adsp_region@85700000",
+      "base": "0x85700000",
+      "size": "0x2800000"
+    },
+    {
+      "name": "mainline:memory@88000000",
+      "base": "0x88000000",
+      "size": "0x1900000"
+    },
+    {
+      "name": "pong:slpi_region@88000000",
+      "base": "0x88000000",
+      "size": "0x1900000"
+    },
+    {
+      "name": "mainline:memory@89900000",
+      "base": "0x89900000",
+      "size": "0x2000000"
+    },
+    {
+      "name": "pong:cdsp_region@89900000",
+      "base": "0x89900000",
+      "size": "0x2000000"
+    },
+    {
+      "name": "mainline:memory@8b900000",
+      "base": "0x8b900000",
+      "size": "0x10000"
+    },
+    {
+      "name": "pong:ipa_fw_region@8b900000",
+      "base": "0x8b900000",
+      "size": "0x10000"
+    },
+    {
+      "name": "mainline:memory@8b910000",
+      "base": "0x8b910000",
+      "size": "0xa000"
+    },
+    {
+      "name": "pong:ipa_gsi_region@8b910000",
+      "base": "0x8b910000",
+      "size": "0xa000"
+    },
+    {
+      "name": "mainline:memory@8b91a000",
+      "base": "0x8b91a000",
+      "size": "0x2000"
+    },
+    {
+      "name": "pong:gpu_microcode_region@8b91a000",
+      "base": "0x8b91a000",
+      "size": "0x2000"
+    },
+    {
+      "name": "mainline:memory@8ba00000",
+      "base": "0x8ba00000",
+      "size": "0x180000"
+    },
+    {
+      "name": "pong:spss_region_region@8ba00000",
+      "base": "0x8ba00000",
+      "size": "0x180000"
+    },
+    {
+      "name": "mainline:memory@8bb80000",
+      "base": "0x8bb80000",
+      "size": "0x60000"
+    },
+    {
+      "name": "pong:spu_tz_shared_mem@8bb80000",
+      "base": "0x8bb80000",
+      "size": "0x60000"
+    },
+    {
+      "name": "mainline:memory@8bbe0000",
+      "base": "0x8bbe0000",
+      "size": "0x20000"
+    },
+    {
+      "name": "pong:spu_modem_shared_mem@8bbe0000",
+      "base": "0x8bbe0000",
+      "size": "0x20000"
+    },
+    {
+      "name": "mainline:memory@8bc00000",
+      "base": "0x8bc00000",
+      "size": "0x13200000"
+    },
+    {
+      "name": "pong:mpss_region@8bc00000",
+      "base": "0x8bc00000",
+      "size": "0x13200000"
+    },
+    {
+      "name": "mainline:memory@9ee00000",
+      "base": "0x9ee00000",
+      "size": "0x700000"
+    },
+    {
+      "name": "pong:cvp_region@9ee00000",
+      "base": "0x9ee00000",
+      "size": "0x700000"
+    },
+    {
+      "name": "mainline:memory@9f500000",
+      "base": "0x9f500000",
+      "size": "0x800000"
+    },
+    {
+      "name": "pong:camera_region@9f500000",
+      "base": "0x9f500000",
+      "size": "0x800000"
+    },
+    {
+      "name": "pong:video_region@9FD00000",
+      "base": "0x9fd00000",
+      "size": "0x700000"
+    },
+    {
+      "name": "mainline:memory@9fd00000",
+      "base": "0x9fd00000",
+      "size": "0x3100000"
+    },
+    {
+      "name": "uefiplat:Display Demura",
+      "base": "0xa1400000",
+      "size": "0x2b00000"
+    },
+    {
+      "name": "mainline:memory@a6b80000",
+      "base": "0xa6b80000",
+      "size": "0x280000"
+    },
+    {
+      "name": "mainline:memory@a6e00000",
+      "base": "0xa6e00000",
+      "size": "0x40000"
+    },
+    {
+      "name": "mainline:memory@a6e00000",
+      "base": "0xa6e00000",
+      "size": "0x40000"
+    },
+    {
+      "name": "pong:xbl_sc_region@a6e00000",
+      "base": "0xa6e00000",
+      "size": "0x40000"
+    },
+    {
+      "name": "mainline:memory@a6f00000",
+      "base": "0xa6f00000",
+      "size": "0x100000"
+    },
+    {
+      "name": "mainline:ramoops@a7000000",
+      "base": "0xa7000000",
+      "size": "0x400000"
+    },
+    {
+      "name": "uefiplat:UEFI FD",
+      "base": "0xa7000000",
+      "size": "0x400000"
+    },
+    {
+      "name": "uefiplat:UEFI FD Reserved",
+      "base": "0xa7400000",
+      "size": "0x200000"
+    },
+    {
+      "name": "uefiplat:Info Blk",
+      "base": "0xa7601000",
+      "size": "0x1000"
+    },
+    {
+      "name": "uefiplat:Log Buffer",
+      "base": "0xa7605000",
+      "size": "0x8000"
+    },
+    {
+      "name": "pong:bootloader_log_region@A7605000",
+      "base": "0xa7605000",
+      "size": "0x8000"
+    },
+    {
+      "name": "mainline:splash_region@b8000000",
+      "base": "0xb8000000",
+      "size": "0x2b00000"
+    },
+    {
+      "name": "uefiplat:Display Reserved",
+      "base": "0xb8000000",
+      "size": "0x2b00000"
+    },
+    {
+      "name": "pong:splash_region",
+      "base": "0xb8000000",
+      "size": "0x2b00000"
+    },
+    {
+      "name": "mainline:memory@bb000000",
+      "base": "0xbb000000",
+      "size": "0x5000000"
+    },
+    {
+      "name": "uefiplat:OEM VM",
+      "base": "0xbb000000",
+      "size": "0x5000000"
+    },
+    {
+      "name": "mainline:memory@c0000000",
+      "base": "0xc0000000",
+      "size": "0x20000000"
+    },
+    {
+      "name": "uefiplat:MTE Reserved",
+      "base": "0xc0000000",
+      "size": "0x20000000"
+    },
+    {
+      "name": "mainline:memory@e0000000",
+      "base": "0xe0000000",
+      "size": "0x600000"
+    },
+    {
+      "name": "uefiplat:VM PIL",
+      "base": "0xe0000000",
+      "size": "0x5700000"
+    },
+    {
+      "name": "mainline:memory@e0600000",
+      "base": "0xe0600000",
+      "size": "0x400000"
+    },
+    {
+      "name": "pong:cpusys_vm_region@e0600000",
+      "base": "0xe0600000",
+      "size": "0x400000"
+    },
+    {
+      "name": "mainline:memory@e0a00000",
+      "base": "0xe0a00000",
+      "size": "0x100000"
+    },
+    {
+      "name": "mainline:memory@e0b00000",
+      "base": "0xe0b00000",
+      "size": "0x4af3000"
+    },
+    {
+      "name": "mainline:memory@e55f3000",
+      "base": "0xe55f3000",
+      "size": "0x9000"
+    },
+    {
+      "name": "pong:trust_ui_vm_qrtr@e55f3000",
+      "base": "0xe55f3000",
+      "size": "0x9000"
+    },
+    {
+      "name": "mainline:memory@e55fc000",
+      "base": "0xe55fc000",
+      "size": "0x4000"
+    },
+    {
+      "name": "pong:trust_ui_vm_vblk0_ring@e55fc000",
+      "base": "0xe55fc000",
+      "size": "0x4000"
+    },
+    {
+      "name": "mainline:memory@e5600000",
+      "base": "0xe5600000",
+      "size": "0x100000"
+    },
+    {
+      "name": "pong:trust_ui_vm_swiotlb@e5600000",
+      "base": "0xe5600000",
+      "size": "0x100000"
+    },
+    {
+      "name": "mainline:memory@e8800000",
+      "base": "0xe8800000",
+      "size": "0x100000"
+    },
+    {
+      "name": "pong:tz_stat_region@e8800000",
+      "base": "0xe8800000",
+      "size": "0x100000"
+    },
+    {
+      "name": "uefiplat:TZ STATS",
+      "base": "0xe8800000",
+      "size": "0x1000000"
+    },
+    {
+      "name": "mainline:memory@e8900000",
+      "base": "0xe8900000",
+      "size": "0x1200000"
+    },
+    {
+      "name": "pong:tags_region@e8900000",
+      "base": "0xe8900000",
+      "size": "0x1200000"
+    },
+    {
+      "name": "mainline:memory@e9b00000",
+      "base": "0xe9b00000",
+      "size": "0x500000"
+    },
+    {
+      "name": "pong:qtee_region@e9b00000",
+      "base": "0xe9b00000",
+      "size": "0x500000"
+    },
+    {
+      "name": "mainline:memory@ea000000",
+      "base": "0xea000000",
+      "size": "0x3900000"
+    },
+    {
+      "name": "uefiplat:TZApps Reserved",
+      "base": "0xea000000",
+      "size": "0x7400000"
+    },
+    {
+      "name": "mainline:memory@ed900000",
+      "base": "0xed900000",
+      "size": "0x3b00000"
+    },
+    {
+      "name": "mainline:memory@f8700000",
+      "base": "0xf8700000",
+      "size": "0x280000"
+    },
+    {
+      "name": "uefiplat:HYP Reserved",
+      "base": "0x830000000",
+      "size": "0x10000000"
+    }
+  ],
+  "allocatable": [
+    {
+      "base": "0x808f4000",
+      "size": "0xc000"
+    },
+    {
+      "base": "0xa3f00000",
+      "size": "0x2c80000"
+    },
+    {
+      "base": "0xa6e40000",
+      "size": "0xc0000"
+    },
+    {
+      "base": "0xa7600000",
+      "size": "0x1000"
+    },
+    {
+      "base": "0xa7602000",
+      "size": "0x3000"
+    },
+    {
+      "base": "0xa760d000",
+      "size": "0x109f3000"
+    },
+    {
+      "base": "0xbab00000",
+      "size": "0x500000"
+    },
+    {
+      "base": "0xe5700000",
+      "size": "0x3100000"
+    },
+    {
+      "base": "0xf1400000",
+      "size": "0x7300000"
+    },
+    {
+      "base": "0xf8980000",
+      "size": "0x7680000"
+    },
+    {
+      "base": "0x800000000",
+      "size": "0x30000000"
+    },
+    {
+      "base": "0x840000000",
+      "size": "0x140000000"
+    }
+  ],
+  "policy": "Intersect with current UEFI EfiConventionalMemory and claim each range; exclude firmware GOP at runtime; never reclaim BootServices/RuntimeServices or reserved descriptors"
+}

@@ -1,0 +1,35 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -5992,6 +5992,24 @@
+ 			md->cs_update(&ctx, data, length);
+ 			md->cs_final(digest, &ctx);
+ 			if (bcmp(expected, digest, md->cs_size)) {
++				/*
++				 * The APFS/UFS read path can leave the tail of a
++				 * final 16K signature block unwritten when that tail
++				 * is a zero-fill hole.  Rebuild the block with the
++				 * tail zeroed, but accept it only when the result
++				 * still matches the CodeDirectory's expected hash.
++				 */
++				if (length == PAGE_SIZE * 4 && offset + length == limit) {
++					uint8_t retry[CS_HASH_MAX_SIZE];
++					bzero((void *)(data + PAGE_SIZE), PAGE_SIZE * 3);
++					md->cs_init(&ctx);
++					md->cs_update(&ctx, data, length);
++					md->cs_final(retry, &ctx);
++					if (bcmp(expected, retry, md->cs_size) == 0) {
++						pong_cs_stage = 111;
++						goto native4k_block_ok;
++					}
++				}
+ 				pong_cs_stage = 108;
+ 				pong_cs_bad_block = (uint32_t)(offset >> 14);
+ 				pong_cs_expected0 = ((uint32_t)expected[0] << 24) |
+@@ -6006,6 +6024,7 @@
+ 				goto out;
+ 			}
+ 			os_atomic_inc(&cs_native4k_full_blocks, relaxed);
++native4k_block_ok:
+ 			for (size_t sub = 0; sub < length; sub += PAGE_SIZE) {
+ 				size_t bytes = MIN((size_t)PAGE_SIZE, length - sub);
+ 				vm_size_t index = (offset + sub) >> PAGE_SHIFT;

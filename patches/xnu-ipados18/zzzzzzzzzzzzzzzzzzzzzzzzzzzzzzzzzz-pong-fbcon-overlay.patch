@@ -1,0 +1,382 @@
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -135,14 +135,23 @@
+ #define FBCON_FG        0xffffffffu
+ #define FBCON_BG        0xff000000u
+ 
+-static volatile uint32_t *fbcon_base;
+-static uint32_t fbcon_width, fbcon_height, fbcon_stride;
++volatile uint32_t *fbcon_base;
++uint32_t fbcon_width, fbcon_height, fbcon_stride;
++uint64_t fbcon_phys;
+ static uint32_t fbcon_cols, fbcon_rows, fbcon_col, fbcon_row;
+ 
++#define FBCON_LOG_ROWS 12
++
++static uint32_t fbcon_log_top;
++static uint8_t fbcon_text[FBCON_LOG_ROWS][256];
++int fbcon_overlay_active;
++unsigned int fbcon_overlay_top;
++
+ static void
+ fbcon_clear_row(uint32_t row)
+ {
+-	for (uint32_t y = row * 16 * FBCON_SCALE; y < (row + 1) * 16 * FBCON_SCALE; y++) {
++	uint32_t y0 = fbcon_log_top + row * 16 * FBCON_SCALE;
++	for (uint32_t y = y0; y < y0 + 16 * FBCON_SCALE; y++) {
+ 		volatile uint32_t *line = fbcon_base + y * (fbcon_stride / 4);
+ 		for (uint32_t x = 0; x < fbcon_width; x++) {
+ 			line[x] = FBCON_BG;
+@@ -151,22 +160,84 @@
+ }
+ 
+ static void
++fbcon_draw_char(uint32_t row, uint32_t col, uint8_t c)
++{
++	const unsigned char *glyph = iso_font + c * 16;
++	uint32_t x0 = col * 8 * FBCON_SCALE, y0 = fbcon_log_top + row * 16 * FBCON_SCALE;
++	for (uint32_t gy = 0; gy < 16; gy++) {
++		for (uint32_t sy = 0; sy < FBCON_SCALE; sy++) {
++			volatile uint32_t *line = fbcon_base +
++			    (y0 + gy * FBCON_SCALE + sy) * (fbcon_stride / 4) + x0;
++			for (uint32_t gx = 0; gx < 8; gx++) {
++				uint32_t px = (glyph[gy] & (1u << gx)) ? FBCON_FG : FBCON_BG;
++				for (uint32_t sx = 0; sx < FBCON_SCALE; sx++) {
++					line[gx * FBCON_SCALE + sx] = px;
++				}
++			}
++		}
++	}
++}
++
++static void
+ fbcon_newline(void)
+ {
+ 	fbcon_col = 0;
+-	fbcon_row = (fbcon_row + 1) % fbcon_rows;
+-	fbcon_clear_row(fbcon_row);
+-	fbcon_clear_row((fbcon_row + 1) % fbcon_rows);
++	if (fbcon_overlay_active) {
++		if (fbcon_row + 1 < fbcon_rows) {
++			fbcon_row++;
++		} else {
++			for (uint32_t r = 0; r + 1 < fbcon_rows; r++)
++				for (uint32_t c = 0; c < 256; c++)
++					fbcon_text[r][c] = fbcon_text[r + 1][c];
++			for (uint32_t c = 0; c < 256; c++)
++				fbcon_text[fbcon_rows - 1][c] = 0;
++		}
++		fbcon_clear_row(fbcon_row);
++	} else {
++		fbcon_row = (fbcon_row + 1) % fbcon_rows;
++		fbcon_clear_row(fbcon_row);
++		fbcon_clear_row((fbcon_row + 1) % fbcon_rows);
++	}
+ }
+ 
+ static void
+ fbcon_init(void)
+ {
++	uint32_t overlay = 0;
++	fbcon_overlay_active = PE_parse_boot_argn("fbcon_overlay", &overlay, sizeof(overlay)) && overlay != 0;
+ 	fbcon_cols = fbcon_width / (8 * FBCON_SCALE);
+-	fbcon_rows = fbcon_height / (16 * FBCON_SCALE);
++	if (fbcon_cols > 256) fbcon_cols = 256;
++	if (fbcon_overlay_active) {
++		fbcon_rows = FBCON_LOG_ROWS;
++		if (fbcon_rows * 16 * FBCON_SCALE > fbcon_height / 2)
++			fbcon_rows = (fbcon_height / 2) / (16 * FBCON_SCALE);
++		if (fbcon_rows == 0) fbcon_rows = 1;
++		fbcon_log_top = fbcon_height - fbcon_rows * 16 * FBCON_SCALE;
++	} else {
++		fbcon_rows = fbcon_height / (16 * FBCON_SCALE);
++		fbcon_log_top = 0;
++	}
++	fbcon_overlay_top = fbcon_log_top;
+ 	fbcon_col = fbcon_row = 0;
++	for (uint32_t r = 0; r < FBCON_LOG_ROWS; r++)
++		for (uint32_t c = 0; c < 256; c++)
++			fbcon_text[r][c] = 0;
++	for (uint32_t r = 0; r < fbcon_rows; r++)
++		fbcon_clear_row(r);
++}
++
++void
++fbcon_redraw(void)
++{
++	if (!fbcon_overlay_active || fbcon_base == NULL)
++		return;
+ 	for (uint32_t r = 0; r < fbcon_rows; r++) {
+ 		fbcon_clear_row(r);
++		for (uint32_t c = 0; c < fbcon_cols; c++) {
++			uint8_t ch = fbcon_text[r][c];
++			if (ch)
++				fbcon_draw_char(r, c, ch);
++		}
+ 	}
+ }
+ 
+@@ -190,20 +261,10 @@
+ 	if (fbcon_col >= fbcon_cols) {
+ 		fbcon_newline();
+ 	}
+-	const unsigned char *glyph = iso_font + c * 16;
+-	uint32_t x0 = fbcon_col * 8 * FBCON_SCALE, y0 = fbcon_row * 16 * FBCON_SCALE;
+-	for (uint32_t gy = 0; gy < 16; gy++) {
+-		for (uint32_t sy = 0; sy < FBCON_SCALE; sy++) {
+-			volatile uint32_t *line = fbcon_base +
+-			    (y0 + gy * FBCON_SCALE + sy) * (fbcon_stride / 4) + x0;
+-			for (uint32_t gx = 0; gx < 8; gx++) {
+-				uint32_t px = (glyph[gy] & (1u << gx)) ? FBCON_FG : FBCON_BG;
+-				for (uint32_t sx = 0; sx < FBCON_SCALE; sx++) {
+-					line[gx * FBCON_SCALE + sx] = px;
+-				}
+-			}
+-		}
+-	}
++	if (c == '\t') c = ' ';
++	if (fbcon_overlay_active && fbcon_row < FBCON_LOG_ROWS && fbcon_col < 256)
++		fbcon_text[fbcon_row][fbcon_col] = c;
++	fbcon_draw_char(fbcon_row, fbcon_col, c);
+ 	fbcon_col++;
+ }
+ 
+@@ -257,6 +318,7 @@
+ 	if (!fbcon_width || !fbcon_height || fbcon_stride < fbcon_width * 4) {
+ 		return;
+ 	}
++	fbcon_phys = reg[0];
+ 	fbcon_base = (volatile uint32_t *)ml_io_map_wcomb(reg[0], reg[1]);
+ 	if (fbcon_base != NULL) {
+ 		register_serial_functions(&liuqin_fbcon_serial_functions);
+--- a/iokit/Kernel/MiniIOMobileFramebuffer.cpp
++++ b/iokit/Kernel/MiniIOMobileFramebuffer.cpp
+@@ -37,6 +37,14 @@
+ extern "C" {
+ #include <console/video_console.h>
+ extern struct vc_info vinfo;            /* the boot framebuffer, as the text console knows it */
++extern "C" volatile uint32_t *fbcon_base;
++extern "C" uint32_t fbcon_width, fbcon_height, fbcon_stride;
++extern "C" int pong_console_muted;
++static volatile uint32_t *gPanelBase;
++static uint32_t gPanelStride, gPanelColumns, gPanelRows;
++extern "C" void fbcon_redraw(void);
++extern "C" int fbcon_overlay_active;
++extern "C" unsigned int fbcon_overlay_top;
+ }
+ 
+ #include <IOKit/IOBufferMemoryDescriptor.h>
+@@ -419,11 +427,42 @@
+ 	fPanelWidth = vinfo.v_width;
+ 	fPanelHeight = vinfo.v_height;
+ 	fRowBytes = vinfo.v_rowbytes;
++	gPanelBase = (volatile uint32_t *) fBase;
++	gPanelStride = fRowBytes;
++	gPanelColumns = fPanelWidth;
++	gPanelRows = fPanelHeight;
++	IOLog("MiniIOMobileFramebuffer: vinfo panel %ux%u stride %u base=%p\n",
++	    fPanelWidth, fPanelHeight, fRowBytes, (void *)vinfo.v_baseaddr);
++	{
++		uint32_t pantest = 0;
++		if (PE_parse_boot_argn("pong_panel_test", &pantest, sizeof(pantest)) && pantest != 0) {
++			/* Display-path test that bypasses iOS, CoreAnimation and the GPU:
++			 * paint eight vertical bars into the boot framebuffer and keep them
++			 * there. Colour bars on the panel prove the address, pitch and
++			 * format are the ones the display scans; the boot logo instead
++			 * means this memory is not what the panel shows. */
++			static const uint32_t bars[8] = {
++				0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffffffu,
++				0xffffff00u, 0xffff00ffu, 0xff00ffffu, 0xff808080u
++			};
++			pong_console_muted = 1;
++			IOLog("MiniIOMobileFramebuffer: panel test: writing 8 bars %ux%u stride %u at %p\n",
++			    fPanelWidth, fPanelHeight, fRowBytes, (void *)fBase);
++			for (uint32_t y = 0; y < fPanelHeight; y++) {
++				uint32_t *row = (uint32_t *)(fBase + (size_t)y * fRowBytes);
++				for (uint32_t x = 0; x < fPanelWidth; x++) {
++					row[x] = bars[(size_t)x * 8 / fPanelWidth];
++				}
++			}
++			IOLog("MiniIOMobileFramebuffer: panel test: bars written; display service not published\n");
++			return false;
++		}
++	}
+ 	fLock = IOLockAlloc();
+ 	fSwapLock = IOLockAlloc();
+ 	fHelperLock = IOLockAlloc();
+-	fColumn = IONewZero(uint32_t, vinfo.v_width);
+-	fColumnWeight = IONewZero(uint16_t, vinfo.v_width);
++	fColumn = IONewZero(uint32_t, fPanelWidth);
++	fColumnWeight = IONewZero(uint16_t, fPanelWidth);
+ 	if (!fLock || !fSwapLock || !fHelperLock || !fColumn || !fColumnWeight) {
+ 		IOLog("MiniIOMobileFramebuffer: no memory for display state\n");
+ 		return failStart(provider);
+@@ -582,6 +621,7 @@
+ 	 * outside the panel. Empty horizontal clips must not index fColumn. */
+ 	if (y0 < 0) y0 = 0;
+ 	if (y1 > (int32_t) fPanelHeight) y1 = (int32_t) fPanelHeight;
++	if (fbcon_overlay_active && y1 > (int32_t) fbcon_overlay_top) y1 = (int32_t) fbcon_overlay_top;
+ 	if (y0 >= y1 || cx0 >= cx1) return;
+ 
+ 	for (int32_t y = y0; y < y1; y++) {
+@@ -699,13 +739,18 @@
+ IOMobileFramebuffer::beginGraphics(void)
+ {
+ 	if (fGraphics) return;
+-	IOLog("MiniIOMobileFramebuffer: first visible frame; releasing boot console\n");
+-	PE_initialize_console(NULL, kPEGraphicsMode);
+-	PE_initialize_console(NULL, kPEReleaseScreen);
++	IOLog("MiniIOMobileFramebuffer: first visible frame; console leaves the panel, the log stays\n");
++	/* Stop the video console painting over the UI, but do not let
++	 * initialize_screen's kPEReleaseScreen set disableConsoleOutput: that
++	 * also drops every later IOLog before the persistent log hook runs, so
++	 * a working kernel looked hung. pong_console_muted skips only the
++	 * screen putc; pong_log_putc still sees every character. */
++	pong_console_muted = 1;
+ 	for (uint32_t y = 0; y < fPanelHeight; y++) {
+ 		uint32_t *row=(uint32_t *)(fBase + (size_t)y * fRowBytes);
+ 					for (uint32_t x=0;x<fPanelWidth;x++) row[x]=0xff000000u;
+ 	}
++	IOLog("MiniIOMobileFramebuffer: panel cleared to black\n");
+ 	fGraphics = true;
+ }
+ 
+@@ -903,6 +948,16 @@
+ 	}
+ 	unsigned slot = (fSwapFirst + fSwapsWaiting) % SWAP_QUEUE;
+ 
++	{
++		static unsigned present_log;
++		if (present_log < 4) {
++			IOLog("MiniIOMobileFramebuffer: present swap=%u layers=0x%x surfaces=%u,%u,%u,%u\n",
++			    swapWord(swap, SWAP_ID), swapWord(swap, SWAP_LAYERS_SET),
++			    swapWord(swap, SWAP_SURFACE(0)), swapWord(swap, SWAP_SURFACE(1)),
++			    swapWord(swap, SWAP_SURFACE(2)), swapWord(swap, SWAP_SURFACE(3)));
++			present_log++;
++		}
++	}
+ 	memcpy(fSwap[slot], swap, SWAP_SIZE);
+ 	for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
+ 		uint32_t sid = swapWord(swap, SWAP_SURFACE(layer));
+@@ -958,6 +1013,14 @@
+ 		memcpy(swap, fSwap[fSwapFirst], SWAP_SIZE);
+ 		memcpy(surfaces, fSwapSurfaces[fSwapFirst], sizeof(surfaces));
+ 		IOLockUnlock(fSwapLock);
++        {
++            static unsigned deq_log;
++            if (deq_log < 4) {
++                IOLog("MiniIOMobileFramebuffer: presenter dequeue swap=%u surface0=%p\n",
++                    swapWord(swap, SWAP_ID), (void *)surfaces[0]);
++                deq_log++;
++            }
++        }
+         IOReturn result=show(swap,surfaces);
+         IOLockLock(fSwapLock);
+         const uint32_t id=swapWord(swap,SWAP_ID);
+@@ -978,6 +1041,14 @@
+ IOReturn
+ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
+ {
++	{
++		static unsigned enter_log;
++		if (enter_log < 4) {
++			IOLog("MiniIOMobileFramebuffer: show enter swap=%u surface0=%p surface1=%p\n",
++			    swapWord(swap, SWAP_ID), (void *)surfaces[0], (void *)surfaces[1]);
++			enter_log++;
++		}
++	}
+ 	uint32_t set = swapWord(swap, SWAP_LAYERS_SET);
+ 	uint64_t began = mach_absolute_time(), nanos, ready, shown, drawn;
+ 	uint32_t layers = 0;
+@@ -1072,7 +1143,13 @@
+ 		IOMemoryDescriptor *memory=base->client?base->client:base->memory;
+ 		size_t offset=(size_t)(base->pixels()-(base->client?base->kpixels:base->kbase));
+ 		beginGraphics();
+-		gpuFrame=pong_scanout_frame(memory,offset,base->info.bytesPerRow,fPanelWidth,fPanelHeight)==1;
++		int scan=pong_scanout_frame(memory,offset,base->info.bytesPerRow,fPanelWidth,fPanelHeight);
++		gpuFrame=scan==1;
++		{
++			static unsigned scan_log;
++			if(scan_log<8)IOLog("MiniIOMobileFramebuffer: scanout swap=%u result=%d gpuFrame=%d\n",
++			    swapWord(swap,SWAP_ID),scan,(int)gpuFrame),scan_log++;
++		}
+         pongDisplayTrace(20,swapWord(swap,SWAP_ID),gpuFrame?4:8,swapWord(swap,SWAP_SURFACE(0)),fPanelWidth,fPanelHeight,base->info.bytesPerRow);
+ 	}
+ 	/* A delivered GPU copy whose completion is uncertain must never race a
+@@ -1189,6 +1266,7 @@
+ 		fStatSince = 0;
+ 	}
+ 	IOLockUnlock(fLock);
++	fbcon_redraw();
+ 	return kIOReturnSuccess;
+ }
+ 
+@@ -1412,6 +1490,35 @@
+ 	}
+ 
+ 	switch (selector) {
++	/* 22H374 backboardd probes these during display bring-up. They are
++	 * scalar queries/setters outside the documented set; the 16.6.1 client
++	 * answered them with neutral values instead of blocking the window
++	 * server. 18 is IOMobileFramebufferIsMainDisplay. */
++	case 15:
++		if (args->scalarOutputCount < 1) {
++			return kIOReturnBadArgument;
++		}
++		out[0] = 0;
++		args->scalarOutputCount = 1;
++		return kIOReturnSuccess;
++
++	case 18:                                        /* out: is the main display */
++		if (args->scalarOutputCount < 1) {
++			return kIOReturnBadArgument;
++		}
++		out[0] = 1;
++		args->scalarOutputCount = 1;
++		return kIOReturnSuccess;
++
++	case 88:
++		return kIOReturnSuccess;
++
++	case 84:                                        /* 4-byte scalar setter */
++		return kIOReturnSuccess;
++
++	case 50:                                        /* two-scalar setter */
++		return kIOReturnSuccess;
++
+ 	case kFBMethodGetDisplaySize:                   /* out: width, height */
+ 		if (args->scalarOutputCount < 2) {
+ 			return kIOReturnBadArgument;
+@@ -1620,16 +1727,27 @@
+ extern "C" void
+ MiniIOMobileFramebufferShow(const uint8_t * pixels, uint32_t width, uint32_t height, uint32_t rowBytes)
+ {
+-	uint32_t columns = width < vinfo.v_width ? width : (uint32_t) vinfo.v_width;
+-	uint32_t rows = height < vinfo.v_height ? height : (uint32_t) vinfo.v_height;
++	uint32_t columns = width < gPanelColumns ? width : gPanelColumns;
++	uint32_t rows = height < gPanelRows ? height : gPanelRows;
++	if (fbcon_overlay_active && rows > (uint32_t) fbcon_overlay_top)
++		rows = (uint32_t) fbcon_overlay_top;
+ 
+-	if (vinfo.v_baseaddr == 0 || vinfo.v_depth != 32) {
++	{
++		static unsigned show_log;
++		if (show_log < 4) {
++			IOLog("MiniIOMobileFramebuffer: software scanout %ux%u stride %u panel=%p\n",
++			    width, height, rowBytes, (void *)gPanelBase);
++			show_log++;
++		}
++	}
++	if (gPanelBase == NULL || gPanelStride < columns * 4 || !columns || !rows) {
+ 		return;
+ 	}
+ 	for (uint32_t y = 0; y < rows; y++) {
+-		memcpy((void *) (vinfo.v_baseaddr + (size_t) y * vinfo.v_rowbytes), pixels + (size_t) y * rowBytes,
+-		    (size_t) columns * 4);
++		memcpy((void *) ((uint8_t *) gPanelBase + (size_t) y * gPanelStride),
++		    pixels + (size_t) y * rowBytes, (size_t) columns * 4);
+ 	}
++	fbcon_redraw();
+ }
+ 
+ void
