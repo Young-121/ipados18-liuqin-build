@@ -150,6 +150,11 @@ jobs:
         run: |
           set -euo pipefail
           export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1
+          # The AEA decryptor (pyhpke) and the firmware verifier (pefile) are not
+          # on the image; the runner python may be PEP 668 managed, hence the chain.
+          python3 -m pip install --disable-pip-version-check pyhpke pefile || \
+            python3 -m pip install --disable-pip-version-check --user pyhpke pefile || \
+            python3 -m pip install --disable-pip-version-check --break-system-packages pyhpke pefile
           ok=1
           for t in hdiutil diskutil aea python3; do
             command -v "$t" >/dev/null || { echo "missing tool: $t"; ok=0; }
@@ -382,6 +387,9 @@ jobs:
             brew install lld
             ls "${LLD_KEG}/bin/"
           fi
+          python3 -m pip install --disable-pip-version-check pyhpke pefile || \
+            python3 -m pip install --disable-pip-version-check --user pyhpke pefile || \
+            python3 -m pip install --disable-pip-version-check --break-system-packages pyhpke pefile
           ok=1
           for t in dtc lzfse mformat mcopy nasm iasl cmake ninja make unifdef python3; do
             command -v "$t" >/dev/null || { echo "missing tool: $t"; ok=0; }
