@@ -145,7 +145,12 @@ kernel_args = [
   "pong_ufs_readwrite=1",
   "native-source-storage=1",
   # GPT partition name carrying the SHNGROOT/APFS windows; it is not HFS.
-  "ufsroot=hfs",
+  # The stock liuqin GPT has no `hfs` partition (that name belongs to the
+  # author's own tablet); on this device the windows go to `userdata`, the
+  # only partition large enough and the one scripts/prepare-ipados18-ufs-layout.py
+  # already records as the target. The kernel finds it by GPT name and the
+  # flashed image is self-describing, so nothing else changes.
+  "ufsroot=userdata",
   "-apfs_shared_datavolume",
   "ignition_level=1",
   "dyld_flags=0x8",
