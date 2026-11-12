@@ -261,9 +261,10 @@ if [ "${XNU_NATIVE_UFS:-0}" = 1 ] && [ -n "${PONG_NATIVE_DRIVER_SOURCE:-}" ]; th
   # under apple/) and write mac-build/native-ufs/bindings.json, which the
   # Adreno step reads for the fixed prelink base and the storage bindings.
   python3 "$PONG_NATIVE_DRIVER_SOURCE/scripts/prepare-ipados18-storage.py" --tree "$ROOT"
+  mkdir -p "$PONG_NATIVE_DRIVER_SOURCE/mac-build/native-ufs"
   python3 "$PONG_NATIVE_DRIVER_SOURCE/scripts/bind-ipados18-storage.py" \
-    --object "$ROOT/mac-build/storage-abi18/reference.o" \
-    --output "$ROOT/mac-build/native-ufs"
+    --object "$PONG_NATIVE_DRIVER_SOURCE/mac-build/storage-abi18/reference.o" \
+    --output "$PONG_NATIVE_DRIVER_SOURCE/mac-build/native-ufs"
 fi
 if [ "${XNU_PONG_WIFI:-0}" = 1 ]; then
   # The Wi-Fi stack needs inputs that are not part of any public restore.
