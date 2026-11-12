@@ -554,6 +554,14 @@ jobs:
           UNIXNU_SHARED_XNU_BUILD: '0'
         run: |
           set -euo pipefail
+          # XNU's makefiles invoke mig; the default in build-xnu-ipados18.sh is
+          # the author's local mig-138 tree. The repository carries Apple's mig
+          # driver script, which resolves migcom through xcrun, and GNU make
+          # exports command-line variables, so MIGCOM must point at a real one.
+          export PONG_MIG="$GITHUB_WORKSPACE/device/scripts/mig-mach-msg2"
+          export PONG_MIGCOM="$(xcrun -find migcom)"
+          test -x "$PONG_MIG"
+          "$PONG_MIG" -version
           args=(--os "${OS_PROFILE}" --uefi ../uefi-liuqin -j 3 --unique-chip-id "${UNIXNU_UNIQUE_CHIP_ID}")
           # Without an original kernelcache the kernel step stages the native
           # build as kernel.macho, which is the bootable one. With prelink it

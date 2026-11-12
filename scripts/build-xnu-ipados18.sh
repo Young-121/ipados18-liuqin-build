@@ -1119,7 +1119,7 @@ XNU_SDK_ARGS=()
 if [ -n "${XNU_SDKROOT:-}" ]; then
   XNU_SDK_ARGS=(SDKROOT_RESOLVED="$XNU_SDKROOT" SDKVERSION="${XNU_SDKVERSION:-18.6}")
 fi
-make -C .cache/xnu-work "${XNU_BUILD_TARGET:-build}" PLATFORM=iPhoneOS SDKROOT="${XNU_SDKROOT:-iphoneos}" "${XNU_SDK_ARGS[@]}" MIG="${PONG_MIG:-/Users/qprs/liuqin-unixnu/tools/mig-138/bin/mig}" MIGCOM="${PONG_MIGCOM:-/Users/qprs/liuqin-unixnu/tools/mig-138/libexec/migcom}" ARCH_CONFIGS=ARM64 \
+make -C .cache/xnu-work "${XNU_BUILD_TARGET:-build}" PLATFORM=iPhoneOS SDKROOT="${XNU_SDKROOT:-iphoneos}" ${XNU_SDK_ARGS[@]+"${XNU_SDK_ARGS[@]}"} MIG="${PONG_MIG:-/Users/qprs/liuqin-unixnu/tools/mig-138/bin/mig}" MIGCOM="${PONG_MIGCOM:-/Users/qprs/liuqin-unixnu/tools/mig-138/libexec/migcom}" ARCH_CONFIGS=ARM64 \
   MACHINE_CONFIGS=PONG KERNEL_CONFIGS=DEVELOPMENT \
   ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY \
   ARM64_LINK_ADDR=0xfffffff007004000 ARM64_PLKSEG_ADDR=0xfffffff004004000 \
