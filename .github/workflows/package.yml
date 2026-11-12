@@ -281,12 +281,15 @@ jobs:
         run: |
           set -euo pipefail
           # One part at a time, deleting each plaintext part once its archive tests
-          # good, so the disk holds at most one extra part.
+          # good, so the disk holds at most one extra part. mx=5: the image is
+          # mostly zeros (32 GiB logical, ~21 GiB of windows), and the download
+          # link from the target network is throttled per connection, so the
+          # archive size matters far more than the runner's compression time.
           mkdir -p upload-userdata
           cp -f ci-products/* upload-userdata/
           for part in out/ipados18/ufs/pong-ipados18-userdata.img.part*; do
             name="$(basename "$part")"
-            7zz a -t7z -mx=0 -mhe=on "-p${ARTIFACT_PASSWORD}" "upload-userdata/${name}.7z" "$part" > /dev/null
+            7zz a -t7z -mx=5 -mhe=on "-p${ARTIFACT_PASSWORD}" "upload-userdata/${name}.7z" "$part" > /dev/null
             7zz t "-p${ARTIFACT_PASSWORD}" "upload-userdata/${name}.7z" > /dev/null
             rm -f "$part"
             echo "encrypted ${name}"
@@ -511,9 +514,32 @@ jobs:
             printf 'PONG_VOLUME_LAYOUT=%s\n' "$PWD/ci-volume-layout.json"
             printf 'PATH=%s:%s:%s\n' "${LLVM_KEG}/bin" "${LLD_KEG}/bin" "$PATH"
           } >> "$GITHUB_ENV"
+      # Downloaded before the package step: the kernel embeds the Adreno 730
+      # GMU/SQE/ZAP firmware (PONG_ADRENO_FIRMWARE below points at this
+      # directory) and the boot image later appends the DTB the stock ABL
+      # selects by msm-id. Both live in the same AES-256 7z release.
+      - name: stock inputs (Cape SoC DTB and Adreno firmware)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_PASSWORD: ${{ secrets.LIUQIN_ARTIFACT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          gh release download "${STOCK_RELEASE}" -R "${STOCK_REPO}" -p '*.7z' -D "${RUNNER_TEMP}/stock-dl"
+          7zz x -y "-p${ARTIFACT_PASSWORD}" "-o${RUNNER_TEMP}/stock" "${RUNNER_TEMP}"/stock-dl/*.7z > /dev/null
+          python3 - "${RUNNER_TEMP}/stock" <<'EOF'
+          import hashlib, json, sys
+          from pathlib import Path
+          d = Path(sys.argv[1])
+          m = json.loads((d / "stock-manifest.json").read_text())
+          for name, want in m["files"].items():
+              got = hashlib.sha256((d / name).read_bytes()).hexdigest()
+              assert got == want["sha256"], f"{name}: {got} != {want['sha256']}"
+          print(f"stock {m['build']}: {', '.join(m['files'])} verified")
+          EOF
       - name: package
         working-directory: device
         env:
+          PONG_ADRENO_FIRMWARE: ${{ runner.temp }}/stock
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
           UNIXNU_UEFI: ${{ github.workspace }}/uefi-liuqin
           UNIXNU_DEVICE: ${{ github.workspace }}/device
@@ -530,28 +556,6 @@ jobs:
             args+=(--skip-prelink)
           fi
           ./scripts/package.sh "${args[@]}"
-      - name: stock Cape SoC DTB
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT_PASSWORD: ${{ secrets.LIUQIN_ARTIFACT_PASSWORD }}
-        run: |
-          set -euo pipefail
-          # The DTB the stock ABL selects by msm-id, from the build on the tablet
-          # (uefi-liuqin release, AES-256 7z). The hardware DTB release appends to
-          # its kernel slot describes the board for the ADT and is not one the ABL
-          # accepts.
-          gh release download "${STOCK_RELEASE}" -R "${STOCK_REPO}" -p '*.7z' -D "${RUNNER_TEMP}/stock-dl"
-          7zz x -y "-p${ARTIFACT_PASSWORD}" "-o${RUNNER_TEMP}/stock" "${RUNNER_TEMP}"/stock-dl/*.7z > /dev/null
-          python3 - "${RUNNER_TEMP}/stock" <<'EOF'
-          import hashlib, json, sys
-          from pathlib import Path
-          d = Path(sys.argv[1])
-          m = json.loads((d / "stock-manifest.json").read_text())
-          for name, want in m["files"].items():
-              got = hashlib.sha256((d / name).read_bytes()).hexdigest()
-              assert got == want["sha256"], f"{name}: {got} != {want['sha256']}"
-          print(f"stock {m['build']}: {', '.join(m['files'])} verified")
-          EOF
       - name: boot image for the firmware
         env:
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
