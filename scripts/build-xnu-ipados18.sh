@@ -256,6 +256,14 @@ if [ "${XNU_NATIVE_UFS:-0}" = 1 ] && [ -n "${PONG_NATIVE_DRIVER_SOURCE:-}" ]; th
   # active Pong source before linking, rather than reuse an older RAM-era .a.
   python3 "$PONG_NATIVE_DRIVER_SOURCE/scripts/build-pong-ufs-ipados18-macos.py" \
     --tree "$ROOT" --skip-image-verification
+  # A fresh checkout carries no git-ignored mac-build/ state: derive the 22H374
+  # storage ABI from the original kernelcache (build-with-runtime.py links it
+  # under apple/) and write mac-build/native-ufs/bindings.json, which the
+  # Adreno step reads for the fixed prelink base and the storage bindings.
+  python3 "$PONG_NATIVE_DRIVER_SOURCE/scripts/prepare-ipados18-storage.py" --tree "$ROOT"
+  python3 "$PONG_NATIVE_DRIVER_SOURCE/scripts/bind-ipados18-storage.py" \
+    --object "$ROOT/mac-build/storage-abi18/reference.o" \
+    --output "$ROOT/mac-build/native-ufs"
 fi
 if [ "${XNU_PONG_WIFI:-0}" = 1 ]; then
   # The Wi-Fi stack needs inputs that are not part of any public restore.
